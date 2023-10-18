@@ -43,21 +43,12 @@ codab = utils.load_codab_all()
 ```
 
 ```python
-utils.process_asap_raw()
+# utils.process_asap_raw()
 ```
 
 ```python
-load_dir = DATA_DIR / "public/raw/glb/asap/reference_data"
-save_dir = DATA_DIR / "public/processed/sah/asap"
-for season in [1, 2]:
-    for s_e in ["s", "e"]:
-        filestem = f"pheno{s_e}{season}_v03"
-        ext = ".tif"
-        da = rxr.open_rasterio(load_dir / f"{filestem}{ext}").astype("uint8")
-        da = da.assign_attrs({"_FillValue": 254})
-        da = da.rio.clip(codab["geometry"], all_touched=True)
-        da = da.squeeze(drop=True)
-        da.rio.to_raster(save_dir / f"{filestem}_sah{ext}", driver="COG")
+da = utils.load_asap_sos_eos()
+da = da.where(da < 251)
 ```
 
 ```python
@@ -65,15 +56,23 @@ da
 ```
 
 ```python
-da.plot()
-```
-
-```python
 da.sel(season=1, s_e="s").plot(cmap="hsv")
 ```
 
 ```python
+da.sel(season=1, s_e="s").plot.hist()
+```
+
+```python
+da.sel(season=2, s_e="s").plot.hist()
+```
+
+```python
 da.sel(season=1, s_e="e").plot(cmap="hsv")
+```
+
+```python
+da.sel(season=2, s_e="s").plot(cmap="hsv")
 ```
 
 ```python
@@ -87,15 +86,10 @@ s2_len.where(s2_len > 0).plot()
 ```
 
 ```python
-longest = xr.where(s2_len > 0, da.sel(season=2), da.sel(season=1))
-longest = longest.where(longest < 251)
+longest = xr.where(s2_len > s1_len, da.sel(season=2), da.sel(season=1))
 longest = longest.where(longest < 72, longest - 36)
 longest = longest.where(longest < 36, longest - 36)
-longest.sel(s_e="s").plot(cmap="hsv")
-```
-
-```python
-
+longest.sel(s_e="e").plot(cmap="hsv")
 ```
 
 ```python

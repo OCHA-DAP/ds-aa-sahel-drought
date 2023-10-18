@@ -27,7 +27,6 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-from ochanticipy import CodAB, create_country_config
 
 from src import utils
 ```
@@ -38,7 +37,8 @@ cod = utils.load_codab_all()
 ```
 
 ```python
-cod
+# utils.process_clip_cod_to_aoi()
+cod_aoi = utils.load_codab_aoi()
 ```
 
 ```python
@@ -46,5 +46,5 @@ cod.plot()
 ```
 
 ```python
-cod[cod["ADM0_CODE"] == "NER"].plot()
+cod_aoi.plot()
 ```
