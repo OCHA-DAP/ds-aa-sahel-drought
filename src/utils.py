@@ -42,7 +42,7 @@ def load_asap_sos_eos():
     da_ss = []
     for season in [1, 2]:
         da_ses = []
-        for s_e in ["s", "e"]:
+        for s_e in ["s", "e", "sen"]:
             filename = f"pheno{s_e}{season}_v03_sah.tif"
             da_se = rxr.open_rasterio(load_dir / filename).astype("uint8")
             da_se["s_e"] = s_e
@@ -60,7 +60,7 @@ def process_asap_raw():
     load_dir = DATA_DIR / "public/raw/glb/asap/reference_data"
     save_dir = DATA_DIR / "public/processed/sah/asap"
     for season in [1, 2]:
-        for s_e in ["s", "e"]:
+        for s_e in ["s", "e", "sen"]:
             filestem = f"pheno{s_e}{season}_v03"
             ext = ".tif"
             da = rxr.open_rasterio(load_dir / f"{filestem}{ext}").astype(
