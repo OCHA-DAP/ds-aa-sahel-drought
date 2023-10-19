@@ -32,6 +32,7 @@ import pandas as pd
 import rioxarray as rxr
 import numpy as np
 import xarray as xr
+from tqdm.notebook import tqdm
 
 from src import utils
 ```
@@ -42,6 +43,11 @@ DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 
 ```python
 aoi = utils.load_codab_aoi()
+```
+
+```python
+test = rxr.open_rasterio(save_dir / f"inseason_dekad1_sen_aoi.tif")
+test.plot()
 ```
 
 ```python
@@ -71,17 +77,18 @@ def dekad_to_month(dekad, pos=None):
 ```
 
 ```python
-dekad_to_month(25)
-```
-
-```python
 s_es = ["s", "e", "sen"]
 s_e_labels = ["start", "end", "senescence"]
 for s_e, s_e_label in zip(s_es, s_e_labels):
-    fig, ax = plt.subplots(figsize=(20, 5))
+    fig, ax = plt.subplots(figsize=(25, 5))
     ax.axis("off")
     aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
-    contour = da.sel(season=1, s_e=s_e).plot.contourf(ax=ax, vmin=25, vmax=37)
+    if s_e == "s":
+        contour = da.sel(season=1, s_e=s_e).plot.contourf(ax=ax, robust=True)
+    else:
+        contour = da.sel(season=1, s_e=s_e).plot.contourf(
+            ax=ax, vmin=25, vmax=37
+        )
     contour.colorbar.formatter = dekad_to_month
     contour.colorbar.set_label("dekad")
     ax.set_title(f"Season 1 {s_e_label}")
@@ -95,7 +102,6 @@ for s_e, s_e_label in zip(s_es, s_e_labels):
         bins=[x - 0.5 for x in range(1, 73)], ax=ax, alpha=0.5, label=s_e_label
     )
 
-
 ax.set_xticks(range(1, 73, 3))
 ax.xaxis.set_major_formatter(dekad_to_month)
 ax.set_xlim([12, 43])
@@ -107,58 +113,54 @@ plt.show()
 ```
 
 ```python
+len_e = da.sel(s_e="e") - da.sel(s_e="s")
+len_sen = da.sel(s_e="sen") - da.sel(s_e="s")
+```
+
+```python
+fig, ax = plt.subplots()
+for da_len, label in zip([len_e, len_sen], ["end", "senescence"]):
+    da_len.sel(season=1).plot.hist(
+        ax=ax, alpha=0.5, label=label, bins=[x - 0.5 for x in range(6, 25)]
+    )
+ax.set_xticks(range(4, 25, 2))
+ax.set_title("Season 1 length distribution")
+ax.set_xlabel("Dekads")
+ax.set_ylabel("Pixel count (1km resolution)")
+ax.legend()
+plt.show()
+```
+
+```python
+for da_len, label in zip([len_e, len_sen], ["end", "senescence"]):
+    fig, ax = plt.subplots(figsize=(25, 5))
+    ax.axis("off")
+    aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
+    contour = da_len.sel(season=1).plot.contourf(ax=ax, vmin=5, vmax=25)
+    contour.colorbar.formatter = lambda x, _: x.astype(int)
+    contour.colorbar.set_label("dekads")
+    ax.set_title(f"Season 1 length, '{label}' as EOS")
+    plt.show()
+```
+
+```python
+# check where season 2 exists - basically nowhere
+da.sel(season=2, s_e="s").plot()
+```
+
+```python
 da.sel(season=2, s_e="s").plot.hist()
 ```
 
 ```python
-da.sel(season=2, s_e="s").plot(cmap="hsv")
+eos_dif = da.sel(s_e="e") - da.sel(s_e="sen")
 ```
 
 ```python
-da.sel(season=2, s_e="s").plot(cmap="hsv")
-```
-
-```python
-s1_len = da.sel(season=1, s_e="e") - da.sel(season=1, s_e="s")
-s1_len.where(s1_len > 0).plot()
-```
-
-```python
-s2_len = da.sel(season=2, s_e="e") - da.sel(season=2, s_e="s")
-s2_len.where(s2_len > 0).plot()
-```
-
-```python
-longest = xr.where(s2_len > s1_len, da.sel(season=2), da.sel(season=1))
-longest = longest.where(longest < 72, longest - 36)
-longest = longest.where(longest < 36, longest - 36)
-longest.sel(s_e="e").plot(cmap="hsv")
-```
-
-```python
-filename = "phenos1_v03.tif"
-sos1 = rxr.open_rasterio(load_dir / filename)
-sos1 = sos1.assign_attrs({"_FillValue": np.nan})
-sos1 = sos1.where(sos1 < 251, drop=True)
-sos1 = sos1.rio.clip(codab["geometry"], all_touched=True)
-sos1.plot()
-```
-
-```python
-filename = "phenoe1_v03.tif"
-soe1 = rxr.open_rasterio(load_dir / filename)
-soe1 = soe1.assign_attrs({"_FillValue": np.nan})
-soe1 = soe1.where(soe1 < 251, drop=True)
-soe1 = soe1.rio.clip(codab["geometry"], all_touched=True)
-soe1.plot()
-```
-
-```python
-# check season 2 - basically nowhere is bimodal, so we can ignore
-filename = "phenos2_v03.tif"
-sos2 = rxr.open_rasterio(load_dir / filename)
-sos2 = sos2.assign_attrs({"_FillValue": np.nan})
-sos2 = sos2.where(sos2 < 251, drop=True)
-sos2 = sos2.rio.clip(codab["geometry"], all_touched=True)
-sos2.plot()
+fig, ax = plt.subplots(figsize=(25, 5))
+ax.axis("off")
+aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
+contour = eos_dif.sel(season=1).plot.contourf(ax=ax, robust=True)
+contour.colorbar.set_label("dekads")
+ax.set_title("Dekads between senscence and season end")
 ```

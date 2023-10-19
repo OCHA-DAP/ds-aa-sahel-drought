@@ -1,12 +1,16 @@
+import itertools
 import os
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import rioxarray as rxr
 import xarray as xr
 from ochanticipy import CodAB, create_country_config
+from rasterio.enums import Resampling
 from shapely import box
+from tqdm import tqdm
 
 DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 
@@ -53,6 +57,30 @@ def load_asap_sos_eos():
     da = xr.concat(da_ss, dim="season")
     da = da.squeeze(drop=True)
     return da
+
+
+def process_iri():
+    pass
+
+
+def clip_asap_inseason_dekad(start_dekad: int = 1):
+    # Note: often crashes. Adjust start_dekad to pick up where you left off.
+    aoi = load_codab_aoi()
+    load_dir = DATA_DIR / "public/processed/glb/asap/season/dekad_sen"
+    save_dir = DATA_DIR / "public/processed/sah/asap/season/dekad_sen"
+    for dekad in tqdm(range(start_dekad, 37)):
+        filestem = f"inseason_dekad{dekad}_sen"
+        ext = ".tif"
+        da = (
+            rxr.open_rasterio(load_dir / f"{filestem}{ext}")
+            .astype(float)
+            .squeeze(drop=True)
+        )
+        da.rio.write_crs(4326, inplace=True)
+        da_clip = da.rio.clip(aoi.geometry, all_touched=True)
+        da_clip = da_clip.fillna(254)
+        da_clip = da_clip.astype("uint8")
+        da_clip.rio.to_raster(save_dir / f"{filestem}_aoi{ext}", driver="COG")
 
 
 def process_asap_raw():
@@ -130,3 +158,61 @@ def load_codab_all() -> gpd.GeoDataFrame:
     load_dir = DATA_DIR / "public/processed/sah/cod_ab"
     filename = "bfa-ner-tcd_adm2_codab.shp.zip"
     return gpd.read_file(f"zip://{load_dir / filename}")
+
+
+def approx_mask_raster(
+    ds: xr.Dataset | xr.DataArray,
+    x_dim: str,
+    y_dim: str,
+    resolution: float = 0.05,
+) -> xr.Dataset:
+    """
+    Resample raster data to given resolution.
+
+    Uses as resample method nearest neighbour, i.e. aims to keep the values
+    the same as the original data. Mainly used to create an approximate mask
+    over an area
+
+    Taken from pa-aa-bfa-drought
+
+    Parameters
+    ----------
+    ds: xr.Dataset
+        Dataset to resample.
+    resolution: float, default = 0.05
+        Resolution in degrees to resample to
+
+    Returns
+    -------
+        Upsampled dataset
+    """
+    upsample_list = []
+    # can only do reproject on 3D array so
+    # loop over all +3D dimensions
+    list_dim = [d for d in ds.dims if (d != x_dim) & (d != y_dim)]
+    # select from second element of list_dim since can loop over 3D
+    # loop over all combs of dims
+    dim_names = list_dim[1:]
+    for dim_values in itertools.product(*[ds[d].values for d in dim_names]):
+        ds_sel = ds.sel(
+            {name: value for name, value in zip(dim_names, dim_values)}
+        )
+
+        ds_sel_upsample = ds_sel.rio.reproject(
+            ds_sel.rio.crs,
+            resolution=resolution,
+            resampling=Resampling.nearest,
+            nodata=np.nan,
+        )
+        upsample_list.append(
+            ds_sel_upsample.expand_dims(
+                {name: [value] for name, value in zip(dim_names, dim_values)}
+            )
+        )
+    ds_upsample = xr.combine_by_coords(upsample_list)
+    # reproject changes spatial dims names to x and y
+    # so change back here
+    ds_upsample = ds_upsample.rename({"x": x_dim, "y": y_dim})
+    if isinstance(ds, xr.DataArray):
+        ds_upsample = ds_upsample[ds.name]
+    return ds_upsample
