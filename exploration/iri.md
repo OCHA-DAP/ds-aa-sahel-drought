@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 import matplotlib.pyplot as plt
+import xarray as xr
 from ochanticipy import (
     GeoBoundingBox,
     IriForecastProb,
@@ -71,13 +72,22 @@ da
 
 ```python
 da_aoi_1 = da.rio.clip(aoi.geometry, all_touched=True)
-```
-
-```python
 fig, ax = plt.subplots(figsize=(25, 5))
 ax.axis("off")
 aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
-da_aoi_1.isel(L=0, F=80).plot(ax=ax)
+da_aoi_1.isel(L=0, F=0).plot(ax=ax)
+
+save_dir = DATA_DIR / "private/processed/sah/iri"
+filename = "sah_iri_lowtercileprob_aoi.nc"
+filepath = save_dir / filename
+# below lines may be needed due to Xarray bug
+# if filepath.exists():
+#     filepath.unlink()
+da_aoi_1.to_netcdf(filepath)
+```
+
+```python
+
 ```
 
 ```python
@@ -91,6 +101,10 @@ fig, ax = plt.subplots(figsize=(25, 5))
 ax.axis("off")
 aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
 da_aoi_01.isel(L=0, F=0).plot(ax=ax)
+```
+
+```python
+da_aoi_01
 ```
 
 ```python

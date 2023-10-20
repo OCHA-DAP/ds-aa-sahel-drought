@@ -46,11 +46,6 @@ aoi = utils.load_codab_aoi()
 ```
 
 ```python
-test = rxr.open_rasterio(save_dir / f"inseason_dekad1_sen_aoi.tif")
-test.plot()
-```
-
-```python
 # utils.process_asap_raw()
 ```
 

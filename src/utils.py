@@ -1,7 +1,9 @@
 import itertools
 import os
 from pathlib import Path
+from typing import Literal
 
+import cftime
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -59,17 +61,136 @@ def load_asap_sos_eos():
     return da
 
 
-def process_iri():
-    pass
+def load_iri():
+    load_dir = DATA_DIR / "private/processed/sah/iri"
+    filename = "sah_iri_lowtercileprob_aoi.nc"
+    da = xr.load_dataset(load_dir / filename)["prob"]
+    return da
+
+
+def calculate_iri_inseason_stats():
+    iri = load_iri()
+    aoi = load_codab_aoi()
+    df_ins = []
+    percentiles = range(10, 100, 20)
+
+    for F in tqdm(iri.F.values):
+        da = load_iri_inseason(forecast_date=F)
+        df_in = da.oap.compute_raster_stats(
+            gdf=aoi, feature_col="ADM0_CODE", percentile_list=percentiles
+        )
+        df_in["F"] = F
+        df_ins.append(df_in)
+
+    stats = pd.concat(df_ins, ignore_index=True)
+    stats["F"] = pd.to_datetime(stats["F"])
+    stats["rel_month1"] = stats["F"].apply(lambda x: x.month) + stats[
+        "L"
+    ].astype(int)
+    stats["rel_month1"] = stats["rel_month1"].apply(
+        lambda x: x if x < 13 else x - 12
+    )
+    stats["F_year"] = stats["F"].apply(lambda x: x.year)
+
+    save_dir = DATA_DIR / "private/processed/sah/iri"
+    filename = "iri_stats_adm0_any_inseason.csv"
+    stats.to_csv(save_dir / filename, index=False)
+
+
+def load_iri_inseason(forecast_date: str | cftime.Datetime360Day):
+    if isinstance(forecast_date, cftime.Datetime360Day):
+        forecast_date = forecast_date.isoformat().split("T")[0]
+    load_dir = DATA_DIR / "private/processed/sah/iri/aoi_inseason_tif"
+    filename = f"sah_iri_lowtercileprob_aoi_inseason_{forecast_date}.tif"
+    da = rxr.open_rasterio(load_dir / filename)
+    da = da.rename({"band": "L"})
+    return da
+
+
+def load_asap_inseason(interval, number, agg: Literal["any", "sum"] = "any"):
+    if interval == "trimester":
+        file_interval = f"{agg}_dekad_"
+        dir_agg = f"trimester_{agg}"
+        number = "-".join(
+            [
+                str(x) if x < 13 else str(x - 12)
+                for x in range(number, number + 3)
+            ]
+        )
+        interval = "months-"
+    else:
+        file_interval, dir_agg = "", "dekad"
+    load_dir = DATA_DIR / f"public/processed/sah/asap/season/{dir_agg}_sen"
+    filename = f"{file_interval}inseason_{interval}{number}_sen_aoi.tif"
+    return rxr.open_rasterio(load_dir / filename).squeeze(drop=True)
+
+
+def process_asap_inseason():
+    # load iri
+    iri = load_iri()
+
+    # load inseason
+    da_ins = []
+    for month in range(1, 13):
+        da_in = load_asap_inseason("trimester", month, agg="any")
+        da_in["start_month"] = month
+        da_ins.append(da_in)
+    tri = xr.concat(da_ins, dim="start_month")
+    tri = tri.where(tri < 251)
+
+    # get intersection of inseason and IRI
+    for F in tqdm(iri.F.values):
+        start_months = [
+            x if x < 13 else x - 12 for x in range(F.month + 1, F.month + 5)
+        ]
+        tri_l = tri.sel(start_month=start_months)
+        tri_l = tri_l.rename({"start_month": "L", "x": "X", "y": "Y"})
+        tri_l["L"] = iri.L
+        da_iri = tri_l * iri.sel(F=F).interp_like(tri_l, method="nearest")
+        da_iri = da_iri.where(da_iri > 0)
+        da_iri = da_iri.transpose("L", "Y", "X")
+        da_iri = da_iri.rio.set_spatial_dims(x_dim="X", y_dim="Y")
+        save_dir = DATA_DIR / "private/processed/sah/iri/aoi_inseason_tif"
+        filename = (
+            f"sah_iri_lowtercileprob_aoi_inseason_"
+            f"{F.isoformat().split('T')[0]}.tif"
+        )
+        da_iri.rio.to_raster(save_dir / filename, driver="COG")
 
 
 def clip_asap_inseason_dekad(start_dekad: int = 1):
-    # Note: often crashes. Adjust start_dekad to pick up where you left off.
+    # Note: might crash. Adjust start_dekad to pick up where you left off.
     aoi = load_codab_aoi()
     load_dir = DATA_DIR / "public/processed/glb/asap/season/dekad_sen"
     save_dir = DATA_DIR / "public/processed/sah/asap/season/dekad_sen"
     for dekad in tqdm(range(start_dekad, 37)):
         filestem = f"inseason_dekad{dekad}_sen"
+        ext = ".tif"
+        da = (
+            rxr.open_rasterio(load_dir / f"{filestem}{ext}")
+            .astype(float)
+            .squeeze(drop=True)
+        )
+        da.rio.write_crs(4326, inplace=True)
+        da_clip = da.rio.clip(aoi.geometry, all_touched=True)
+        da_clip = da_clip.fillna(254)
+        da_clip = da_clip.astype("uint8")
+        da_clip.rio.to_raster(save_dir / f"{filestem}_aoi{ext}", driver="COG")
+
+
+def clip_asap_inseason_trimester(start_month: int = 1):
+    # Note: might crash. Adjust start_month to pick up where you left off.
+    aoi = load_codab_aoi()
+    load_dir = DATA_DIR / "public/processed/glb/asap/season/trimester_any_sen"
+    save_dir = DATA_DIR / "public/processed/sah/asap/season/trimester_any_sen"
+    for month in tqdm(range(start_month, 13)):
+        rel_months_str = "-".join(
+            [
+                str(x) if x < 13 else str(x - 12)
+                for x in range(month, month + 3)
+            ]
+        )
+        filestem = f"any_dekad_inseason_months-{rel_months_str}_sen"
         ext = ".tif"
         da = (
             rxr.open_rasterio(load_dir / f"{filestem}{ext}")
