@@ -18,15 +18,15 @@ DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 
 
 def load_codab_aoi() -> gpd.GeoDataFrame:
+    """Loads CODAB of AOI"""
     load_dir = DATA_DIR / "public/processed/sah/cod_ab"
     filename = "bfa-ner-tcd_adm2_codab_aoi.shp.zip"
     return gpd.read_file(f"zip://{load_dir / filename}")
 
 
 def process_clip_cod_to_aoi():
-    """
-    Clip CODAB to area of interest for frameworks. In Burkina and Chad, based
-    on specific admin1s. In Niger, is everything south of 17N.
+    """Clip CODAB to area of interest for frameworks. In Burkina and Chad,
+    based on specific admin1s. In Niger, is everything south of 17N.
     Returns
     -------
 
@@ -43,7 +43,13 @@ def process_clip_cod_to_aoi():
     cod_clip.to_file(save_dir / filename)
 
 
-def load_asap_sos_eos():
+def load_asap_sos_eos() -> xr.DataArray:
+    """Loads ASAP start/end/senescence of season for countries of interest.
+
+    Returns
+    -------
+    xr.DataArray
+    """
     load_dir = DATA_DIR / "public/processed/sah/asap"
     da_ss = []
     for season in [1, 2]:
@@ -61,14 +67,28 @@ def load_asap_sos_eos():
     return da
 
 
-def load_iri():
+def load_iri() -> xr.DataArray:
+    """Loads IRI low tercile probability over AOI
+
+    Returns
+    -------
+    xr.DataArray
+    """
     load_dir = DATA_DIR / "private/processed/sah/iri"
     filename = "sah_iri_lowtercileprob_aoi.nc"
     da = xr.load_dataset(load_dir / filename)["prob"]
     return da
 
 
+def load_iri_inseason_stats() -> pd.DataFrame:
+    """Loads raster stats for IRI-inseason intersections."""
+    load_dir = DATA_DIR / "private/processed/sah/iri"
+    filename = "iri_stats_adm0_any_inseason.csv"
+    return pd.read_csv(load_dir / filename)
+
+
 def calculate_iri_inseason_stats():
+    """Calculates raster stats for IRI-inseason intersections."""
     iri = load_iri()
     aoi = load_codab_aoi()
     df_ins = []
@@ -97,7 +117,20 @@ def calculate_iri_inseason_stats():
     stats.to_csv(save_dir / filename, index=False)
 
 
-def load_iri_inseason(forecast_date: str | cftime.Datetime360Day):
+def load_iri_inseason(
+    forecast_date: str | cftime.Datetime360Day,
+) -> xr.DataArray:
+    """Loads IRI forecast masked by trimestrial inseason from ASAP
+
+    Parameters
+    ----------
+    forecast_date: str | cftime.Datetime360Day
+        IRI forecast publication date
+
+    Returns
+    -------
+
+    """
     if isinstance(forecast_date, cftime.Datetime360Day):
         forecast_date = forecast_date.isoformat().split("T")[0]
     load_dir = DATA_DIR / "private/processed/sah/iri/aoi_inseason_tif"
@@ -107,7 +140,26 @@ def load_iri_inseason(forecast_date: str | cftime.Datetime360Day):
     return da
 
 
-def load_asap_inseason(interval, number, agg: Literal["any", "sum"] = "any"):
+def load_asap_inseason(
+    interval: Literal["dekad", "trimester"],
+    number: int,
+    agg: Literal["any", "sum"] = "any",
+) -> xr.DataArray:
+    """Loads ASAP inseason rasters.
+
+    Parameters
+    ----------
+    interval: Literal["dekad", "trimester"]
+    number: int
+        The number of the interval to load.
+        For trimester, the first month of the trimester.
+    agg: Literal["any", "sum"] = "any"
+
+
+    Returns
+    -------
+
+    """
     if interval == "trimester":
         file_interval = f"{agg}_dekad_"
         dir_agg = f"trimester_{agg}"
@@ -125,7 +177,19 @@ def load_asap_inseason(interval, number, agg: Literal["any", "sum"] = "any"):
     return rxr.open_rasterio(load_dir / filename).squeeze(drop=True)
 
 
-def process_asap_inseason():
+def process_iri_inseason():
+    """Processes IRI and ASAP inseason intersection.
+    Interpolates IRI forecast (1deg resolution) at coordinates of ASAP inseason
+     raster (0.01deg resolution).
+    Keeps only pixels that are in season.
+
+    Returns
+    -------
+
+    """
+    # Note: not very computationally efficient,
+    # but works at this scale of data.
+
     # load iri
     iri = load_iri()
 
@@ -159,6 +223,7 @@ def process_asap_inseason():
 
 
 def clip_asap_inseason_dekad(start_dekad: int = 1):
+    """Clips existing global inseason dekad files to AOI"""
     # Note: might crash. Adjust start_dekad to pick up where you left off.
     aoi = load_codab_aoi()
     load_dir = DATA_DIR / "public/processed/glb/asap/season/dekad_sen"
@@ -179,6 +244,7 @@ def clip_asap_inseason_dekad(start_dekad: int = 1):
 
 
 def clip_asap_inseason_trimester(start_month: int = 1):
+    """Clips existing global inseason trimester files to AOI"""
     # Note: might crash. Adjust start_month to pick up where you left off.
     aoi = load_codab_aoi()
     load_dir = DATA_DIR / "public/processed/glb/asap/season/trimester_any_sen"
@@ -204,7 +270,8 @@ def clip_asap_inseason_trimester(start_month: int = 1):
         da_clip.rio.to_raster(save_dir / f"{filestem}_aoi{ext}", driver="COG")
 
 
-def process_asap_raw():
+def clip_asap_raw():
+    """Clips ASAP start/end/senescence to AOI"""
     codab = load_codab_all()
     load_dir = DATA_DIR / "public/raw/glb/asap/reference_data"
     save_dir = DATA_DIR / "public/processed/sah/asap"
