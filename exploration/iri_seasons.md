@@ -181,12 +181,12 @@ for adm0 in max_per_year["ADM0_CODE"].unique():
     for method in ["months", "frac_reporting"]:
         if method == "months":
             rel_stats = stats[stats["rel_month1"].isin(rel_months)]
-            title_text = f"Fraction Reporting > {frac_reporting_threshold}"
+            title_text = f"Relevant months: {total_months}"
         else:
             rel_stats = stats[
                 stats["frac_reporting"] > frac_reporting_threshold
             ]
-            title_text = f"Relevant months: {total_months}"
+            title_text = f"Fraction Reporting > {frac_reporting_threshold}"
         max_per_year = (
             rel_stats.groupby(["ADM0_CODE", "F_year"])[percetile_cols]
             .max()

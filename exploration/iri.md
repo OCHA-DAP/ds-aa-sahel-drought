@@ -60,7 +60,7 @@ iri_prob = IriForecastProb(
 ```python
 # Note: iri_prob.download() requires Python 3.9
 
-# iri_prob.download()
+# iri_prob.download(clobber=True)
 # iri_prob.process()
 da = iri_prob.load()["prob"]
 da = da.sel(C=0).squeeze(drop=True)
