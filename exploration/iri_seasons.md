@@ -49,7 +49,7 @@ DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 We have IRI at 1 degree resolution and "inseason" at 0.01 degree resolution.
 
 ```python
-aoi = utils.load_codab_aoi()
+aoi = utils.load_codab(aoi_only=True)
 iri = utils.load_iri()
 da = utils.load_asap_inseason("dekad", 19)
 ```

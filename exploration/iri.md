@@ -47,8 +47,8 @@ DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 
 ```python
 # set up config
-cod_all = utils.load_codab_all()
-aoi = utils.load_codab_aoi()
+cod_all = utils.load_codab()
+aoi = utils.load_codab(aoi_only=True)
 country_config = create_custom_country_config("../sah.yaml")
 geobb = GeoBoundingBox.from_shape(cod_all)
 
