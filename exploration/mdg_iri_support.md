@@ -29,6 +29,7 @@ import cftime
 import geopandas as gpd
 import datetime
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import rioxarray as rxr
 import xarray as xr
@@ -159,9 +160,17 @@ for adm0 in max_per_year["name1"].unique():
         oct_fcast_mean = oct_fcast[
             (oct_fcast["name1"] == adm0) & (oct_fcast["L"] == L)
         ]["mean"]
-        ax.plot([1, 7], [oct_fcast_mean.values[0], oct_fcast_mean.values[0]])
+        oct_fcast_rp = np.interp(
+            oct_fcast_mean, dff["mean"], dff["return_period"]
+        )
+        # print(oct_fcast_rp)
+        ax.plot([oct_fcast_rp], [oct_fcast_mean.values[0]], marker=".", l)
     ax.legend(
         title="Mean prob.",
         labels=["historical", *[f"{x} 2023 forecast" for x in f_mon]],
     )
+```
+
+```python
+
 ```
