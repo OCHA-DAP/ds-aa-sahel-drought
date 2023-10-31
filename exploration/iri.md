@@ -28,14 +28,6 @@ from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import xarray as xr
-from ochanticipy import (
-    GeoBoundingBox,
-    IriForecastProb,
-    IriForecastDominant,
-    CodAB,
-    create_country_config,
-    create_custom_country_config,
-)
 from rasterio.enums import Resampling
 
 from src import utils
@@ -45,72 +37,38 @@ from src import utils
 DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 ```
 
+## Load and process
+
+Load IRI low tercile and AOI. Up-sample IRI and clip to AOI.
+
 ```python
-# set up config
-cod_all = utils.load_codab()
+utils.process_iri_aoi_lowtercile()
+iri = utils.load_iri()
 aoi = utils.load_codab(aoi_only=True)
-country_config = create_custom_country_config("../sah.yaml")
-geobb = GeoBoundingBox.from_shape(cod_all)
 
-iri_prob = IriForecastProb(
-    country_config=country_config, geo_bounding_box=geobb
-)
-```
-
-```python
-# Note: iri_prob.download() requires Python 3.9
-
-# iri_prob.download(clobber=True)
-# iri_prob.process()
-da = iri_prob.load()["prob"]
-da = da.sel(C=0).squeeze(drop=True)
-```
-
-```python
-da
-```
-
-```python
-da_aoi_1 = da.rio.clip(aoi.geometry, all_touched=True)
-fig, ax = plt.subplots(figsize=(25, 5))
-ax.axis("off")
-aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
-da_aoi_1.isel(L=0, F=0).plot(ax=ax)
-
-save_dir = DATA_DIR / "private/processed/sah/iri"
-filename = "sah_iri_lowtercileprob_aoi.nc"
-filepath = save_dir / filename
-# below lines may be needed due to Xarray bug
-# if filepath.exists():
-#     filepath.unlink()
-da_aoi_1.to_netcdf(filepath)
-```
-
-```python
-
-```
-
-```python
 resolution = 0.1
-da_aoi_01 = utils.approx_mask_raster(da_aoi_1, "X", "Y", resolution)
-da_aoi_01 = da_aoi_01.rio.clip(aoi.geometry, all_touched=True)
+iri_01 = utils.approx_mask_raster(iri, "X", "Y", resolution)
+iri_01 = iri_01.rio.clip(aoi.geometry, all_touched=True)
 ```
+
+Check that resolution of clip seems reasonable - fits boundaries decently well.
 
 ```python
 fig, ax = plt.subplots(figsize=(25, 5))
 ax.axis("off")
 aoi.boundary.plot(linewidth=0.2, ax=ax, color="black")
-da_aoi_01.isel(L=0, F=0).plot(ax=ax)
+iri_01.isel(L=0, F=0).plot(ax=ax)
+plt.show()
 ```
 
-```python
-da_aoi_01
-```
+## Calculate stats
+
+Calculate basic stats for IRI forecast, by country.
 
 ```python
 percentiles = range(10, 100, 10)
 percetile_cols = [f"{x}quant" for x in percentiles]
-stats = da_aoi_01.oap.compute_raster_stats(
+stats = iri_01.oap.compute_raster_stats(
     gdf=aoi, feature_col="ADM0_CODE", percentile_list=percentiles
 )
 stats["rel_month1"] = stats["F"].apply(lambda x: x.month) + stats["L"].astype(
@@ -118,6 +76,14 @@ stats["rel_month1"] = stats["F"].apply(lambda x: x.month) + stats["L"].astype(
 )
 stats["F_year"] = stats["F"].apply(lambda x: x.year)
 ```
+
+Here we can plot the return period of the low tercile probability by country.
+It's more or less what we expect, and is similar to the analysis previously
+done for the frameworks.
+Note that this doesn't include any seasonality,
+other than only looking at Jun-Oct.
+
+The mean is pretty close to the 50% quantile, so the distribution isn't too skewed.
 
 ```python
 rel_months = [6, 7, 8]
@@ -150,5 +116,5 @@ for adm0 in max_per_year["ADM0_CODE"].unique():
 ```
 
 ```python
-max_per_year
+
 ```

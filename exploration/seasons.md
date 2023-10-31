@@ -42,7 +42,7 @@ DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 ```
 
 ```python
-aoi = utils.load_codab_aoi()
+aoi = utils.load_codab(aoi_only=True)
 ```
 
 ```python
@@ -55,17 +55,14 @@ da = da.rio.clip(aoi.geometry, all_touched=True)
 da = da.where(da < 251)
 da = da.assign_attrs({"_FillValue": np.nan})
 # bring all into two years
-da = da.where(da < 37, da - 36)
-# da = da.where(da < 37, da - 36)
+da = ((da - 1) % 36) + 1
 ```
 
 ```python
 def dekad_to_month(dekad, pos=None):
     if dekad < 1:
         return None
-    dekad = np.round(dekad).astype(int)
-    dekad = dekad - 72 if dekad > 72 else dekad
-    dekad = dekad - 36 if dekad > 36 else dekad
+    dekad = ((np.round(dekad).astype(int) - 1) % 36) + 1
     month = datetime.datetime(2023, (dekad - 1) // 3 + 1, 1).strftime("%b")
     num = (dekad - 1) % 3 + 1
     return f"{month} {num}"

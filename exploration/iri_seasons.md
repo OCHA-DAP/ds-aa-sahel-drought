@@ -73,6 +73,8 @@ da.plot(ax=ax)
 Not the most computationally efficient, but works for this size of data.
 
 We just interpolate the IRI forecast at the coordinates of the "inseason".
+This is basically equivalent to up-sampling the IRI forecast, then masking with
+the "inseason".
 Then we can re-aggregate however we want (adm0, adm1, livelihoods zone, etc).
 
 ```python
@@ -174,10 +176,11 @@ That way the denominator stays the same.
 frac_reporting_threshold = 0.5
 rel_months = [6, 7, 8]
 total_months = [x for x in range(min(rel_months), max(rel_months) + 3)]
+percentiles = range(10, 100, 20)
 plot_quants = [10, 50, 90]
 plot_quant_cols = [f"{100 - x}quant" for x in percentiles if x in plot_quants]
 
-for adm0 in max_per_year["ADM0_CODE"].unique():
+for adm0 in stats["ADM0_CODE"].unique():
     for method in ["months", "frac_reporting"]:
         if method == "months":
             rel_stats = stats[stats["rel_month1"].isin(rel_months)]
@@ -188,7 +191,7 @@ for adm0 in max_per_year["ADM0_CODE"].unique():
             ]
             title_text = f"Fraction Reporting > {frac_reporting_threshold}"
         max_per_year = (
-            rel_stats.groupby(["ADM0_CODE", "F_year"])[percetile_cols]
+            rel_stats.groupby(["ADM0_CODE", "F_year"])[plot_quant_cols]
             .max()
             .reset_index()
         )
@@ -205,4 +208,8 @@ for adm0 in max_per_year["ADM0_CODE"].unique():
         ax.set_xlabel("Return period (years)")
         ax.set_ylabel("Prob. of low tercile")
         ax.legend(title="Frac. of inseason AOI", labels=plot_quants)
+```
+
+```python
+
 ```

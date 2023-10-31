@@ -33,18 +33,31 @@ from src import utils
 
 ```python
 # utils.process_codab_all()
-cod = utils.load_codab_all()
+cod = utils.load_codab()
+# utils.process_clip_cod_to_aoi()
+cod_aoi = utils.load_codab(aoi_only=True)
 ```
 
-```python
-# utils.process_clip_cod_to_aoi()
-cod_aoi = utils.load_codab_aoi()
-```
+## Plotting
+
+Check that CODAB for entire countries includes Burkina, Niger, Chad.
 
 ```python
 cod.plot()
 ```
 
+Check that CODAB for Area of Interest includes:
+
+- Burkina: Boucle du Mouhoun, Nord, Centre-Nord, Sahel
+- Niger: everything below 17 N
+- Chad: Lac, Kanem, Barh-El-Gazel, Batha, Wadi Fira
+
+These are the Areas of Interest from the existing frameworks for the three countries.
+
 ```python
 cod_aoi.plot()
+```
+
+```python
+
 ```

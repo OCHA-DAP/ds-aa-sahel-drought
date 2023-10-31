@@ -164,7 +164,9 @@ for adm0 in max_per_year["name1"].unique():
             oct_fcast_mean, dff["mean"], dff["return_period"]
         )
         # print(oct_fcast_rp)
-        ax.plot([oct_fcast_rp], [oct_fcast_mean.values[0]], marker=".", l)
+        ax.plot(
+            [oct_fcast_rp], [oct_fcast_mean.values[0]], marker=".", ls="None"
+        )
     ax.legend(
         title="Mean prob.",
         labels=["historical", *[f"{x} 2023 forecast" for x in f_mon]],

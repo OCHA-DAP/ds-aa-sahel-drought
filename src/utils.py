@@ -9,7 +9,13 @@ import numpy as np
 import pandas as pd
 import rioxarray as rxr
 import xarray as xr
-from ochanticipy import CodAB, create_country_config
+from ochanticipy import (
+    CodAB,
+    GeoBoundingBox,
+    IriForecastProb,
+    create_country_config,
+    create_custom_country_config,
+)
 from rasterio.enums import Resampling
 from shapely import box
 from tqdm import tqdm
@@ -90,6 +96,32 @@ def load_asap_sos_eos() -> xr.DataArray:
     return da
 
 
+def process_iri_aoi_lowtercile():
+    """Processes IRI low tercile probability for only AOI"""
+    cod_all = load_codab()
+    aoi = load_codab(aoi_only=True)
+    country_config = create_custom_country_config("../sah.yaml")
+    geobb = GeoBoundingBox.from_shape(cod_all)
+
+    iri_prob = IriForecastProb(
+        country_config=country_config, geo_bounding_box=geobb
+    )
+    # download and process with AnticiPy
+    # Note: iri_prob.download() requires Python 3.9
+    iri_prob.download()
+    iri_prob.process()
+    da = iri_prob.load()["prob"]
+    # keep only low tercile (C=0)
+    da = da.sel(C=0).squeeze(drop=True)
+    da_aoi = da.rio.clip(aoi.geometry, all_touched=True)
+    filename = "sah_iri_lowtercileprob_aoi.nc"
+    filepath = PROC_IRI_DIR / filename
+    # below lines may be needed due to Xarray bug
+    if filepath.exists():
+        filepath.unlink()
+    da_aoi.to_netcdf(filepath)
+
+
 def load_iri() -> xr.DataArray:
     """Loads IRI low tercile probability over AOI
 
@@ -99,6 +131,7 @@ def load_iri() -> xr.DataArray:
     """
     filename = "sah_iri_lowtercileprob_aoi.nc"
     da = xr.load_dataset(PROC_IRI_DIR / filename)["prob"]
+    da.rio.write_crs(4326, inplace=True)
     return da
 
 
@@ -267,10 +300,7 @@ def clip_asap_inseason_trimester(start_month: int = 1):
     aoi = load_codab(aoi_only=True)
     for month in tqdm(range(start_month, 13)):
         rel_months_str = "-".join(
-            [
-                str(x) if x < 13 else str(x - 12)
-                for x in range(month, month + 3)
-            ]
+            [str(((x - 1) % 12) + 1) for x in range(month, month + 3)]
         )
         filestem = f"any_dekad_inseason_months-{rel_months_str}_sen"
         ext = ".tif"
