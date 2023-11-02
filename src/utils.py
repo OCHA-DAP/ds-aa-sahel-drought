@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
+import cdsapi
 import cftime
 import geopandas as gpd
 import numpy as np
@@ -32,6 +33,77 @@ PROC_SAH_SEASON_DEKAD_DIR = PROC_SAH_SEASON_DIR / "dekad_sen"
 PROC_GLB_SEASON_TRI_DIR = PROC_GLB_SEASON_DIR / "trimester_any_sen"
 PROC_SAH_SEASON_TRI_DIR = PROC_SAH_SEASON_DIR / "trimester_any_sen"
 RAW_ASAP_REF_DIR = DATA_DIR / "public/raw/glb/asap/reference_data"
+RAW_ECMWF_DIR = DATA_DIR / "public" / "raw" / "sah" / "ecmwf"
+PROC_ECMWF_DIR = DATA_DIR / "public" / "processed" / "sah" / "ecmwf"
+
+
+def process_ecmwf_rank() -> xr.Dataset:
+    pass
+
+
+def load_ecmwf() -> xr.DataArray:
+    filename = "ecmwf_total-precipitation_sah.nc"
+    ds = xr.open_dataset(PROC_ECMWF_DIR / filename)
+    da = ds["tprate"]
+    da.rio.set_crs(4326, inplace=True)
+    da = da.drop_vars("surface")
+    return da
+
+
+def process_ecmwf():
+    leadtimes = range(1, 7)
+    aoi = load_codab(aoi_only=True)
+    das = []
+    system = "51"
+    fileformat = "grib"
+    for leadtime in tqdm(leadtimes):
+        filename = f"ecmwf-total-leadtime-{leadtime}_sys{system}.{fileformat}"
+        ds = xr.load_dataset(RAW_ECMWF_DIR / filename, engine="cfgrib")
+        da = ds["tprate"].mean(dim=["number", "step"])
+        da.rio.write_crs(4326, inplace=True)
+        da = da.rio.clip(aoi.geometry, all_touched=True)
+        da["leadtime"] = leadtime
+        das.append(da)
+    em = xr.concat(das, dim="leadtime")
+
+    filename = "ecmwf_total-precipitation_sah.nc"
+    filepath = PROC_ECMWF_DIR / filename
+    if filepath.exists():
+        filepath.unlink()
+    em.to_netcdf(filepath)
+
+
+def download_ecmwf():
+    c = cdsapi.Client()
+    aoi = load_codab(aoi_only=True)
+    bounds = aoi.total_bounds
+    area = [bounds[3], bounds[0], bounds[1], bounds[2]]
+    start_year = 1981
+    end_year = 2022
+    leadtimes = range(1, 7)
+    system = "51"
+    fileformat = "grib"
+    for leadtime_month in leadtimes:
+        print(leadtime_month)
+        data_request_netcdf = {
+            "format": fileformat,
+            "originating_centre": "ecmwf",
+            "system": system,
+            "variable": "total_precipitation",
+            "product_type": "monthly_mean",
+            "year": [f"{d}" for d in range(start_year, end_year + 1)],
+            "month": [f"{d:02d}" for d in range(1, 13)],
+            "leadtime_month": leadtime_month,
+            "area": area,
+        }
+        filename = (
+            f"ecmwf-total-leadtime-{leadtime_month}_sys{system}.{fileformat}"
+        )
+        c.retrieve(
+            "seasonal-monthly-single-levels",
+            data_request_netcdf,
+            RAW_ECMWF_DIR / filename,
+        )
 
 
 def load_codab(aoi_only: bool = False) -> gpd.GeoDataFrame:
