@@ -30,6 +30,8 @@ PROC_GLB_SEASON_DIR = DATA_DIR / "public/processed/glb/asap/season"
 PROC_SAH_SEASON_DIR = DATA_DIR / "public/processed/sah/asap/season"
 PROC_GLB_SEASON_DEKAD_DIR = PROC_GLB_SEASON_DIR / "dekad_sen"
 PROC_SAH_SEASON_DEKAD_DIR = PROC_SAH_SEASON_DIR / "dekad_sen"
+PROC_GLB_SEASON_MONTH_DIR = PROC_GLB_SEASON_DIR / "month_sen"
+PROC_SAH_SEASON_MONTH_DIR = PROC_SAH_SEASON_DIR / "month_any_sen"
 PROC_GLB_SEASON_TRI_DIR = PROC_GLB_SEASON_DIR / "trimester_any_sen"
 PROC_SAH_SEASON_TRI_DIR = PROC_SAH_SEASON_DIR / "trimester_any_sen"
 RAW_ASAP_REF_DIR = DATA_DIR / "public/raw/glb/asap/reference_data"
@@ -265,7 +267,7 @@ def load_iri_inseason(
 
 
 def load_asap_inseason(
-    interval: Literal["dekad", "trimester"],
+    interval: Literal["dekad", "month", "trimester"],
     number: int,
     agg: Literal["any", "sum"] = "any",
 ) -> xr.DataArray:
@@ -273,7 +275,7 @@ def load_asap_inseason(
 
     Parameters
     ----------
-    interval: Literal["dekad", "trimester"]
+    interval: Literal["dekad", "month", "trimester"]
     number: int
         The number of the interval to load.
         For trimester, the first month of the trimester.
@@ -282,7 +284,7 @@ def load_asap_inseason(
 
     Returns
     -------
-
+    xr.DataArray
     """
     if interval == "trimester":
         file_interval = f"{agg}_dekad_"
@@ -294,6 +296,9 @@ def load_asap_inseason(
             ]
         )
         interval = "months-"
+    elif interval == "month":
+        file_interval = ""
+        dir_agg = f"month_{agg}"
     else:
         file_interval, dir_agg = "", "dekad"
     load_dir = PROC_SAH_SEASON_DIR / f"{dir_agg}_sen"
@@ -363,6 +368,27 @@ def clip_asap_inseason_dekad(start_dekad: int = 1):
         da_clip = da_clip.astype("uint8")
         da_clip.rio.to_raster(
             PROC_SAH_SEASON_DEKAD_DIR / f"{filestem}_aoi{ext}", driver="COG"
+        )
+
+
+def clip_asap_inseason_month(start_month: int = 1):
+    """Clips existing global inseason month files to AOI"""
+    # Note: might crash. Adjust start_month to pick up where you left off.
+    aoi = load_codab(aoi_only=True)
+    for month in tqdm(range(start_month, 13)):
+        filestem = f"inseason_month{month}_sen"
+        ext = ".tif"
+        da = (
+            rxr.open_rasterio(PROC_GLB_SEASON_MONTH_DIR / f"{filestem}{ext}")
+            .astype(float)
+            .squeeze(drop=True)
+        )
+        da.rio.write_crs(4326, inplace=True)
+        da_clip = da.rio.clip(aoi.geometry, all_touched=True)
+        da_clip = da_clip.fillna(254)
+        da_clip = da_clip.astype("uint8")
+        da_clip.rio.to_raster(
+            PROC_SAH_SEASON_MONTH_DIR / f"{filestem}_aoi{ext}", driver="COG"
         )
 
 

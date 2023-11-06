@@ -69,6 +69,9 @@ da = utils.load_ecmwf()
 ds = da.to_dataset()
 da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12 + 1
 df = da.to_dataframe().reset_index()
+df["valid_time"] = df.apply(
+    lambda row: row["time"] + pd.DateOffset(months=row["leadtime"]), axis=1
+)
 df_groupby = df.groupby(["valid_month", "latitude", "longitude"])["tprate"]
 df["rank"] = df_groupby.rank().astype("float32")
 df["zscore"] = df_groupby.transform(lambda x: zscore(x))
@@ -209,6 +212,22 @@ for x in ["zscore", "zscore_lt"]:
     ds[x].mean(dim=["latitude", "longitude", "time"]).plot(ax=ax)
 ```
 
+Here we can just verify again that using `zscore_lt` properly normalizes the
+distribution.
+The first plot shows `zscore` with the lower leadtimes skewing higher.
+The second plot shows all leadtimes with the same distribution for `zscore_lt`.
+
+```python
+for zscore in ["zscore", "zscore_lt"]:
+    fig, ax = plt.subplots()
+    for lt in range(1, 7):
+        df[df["leadtime"] == lt][zscore].hist(
+            histtype="step", bins=100, label=lt, ax=ax
+        )
+    ax.legend(title="Leadtime")
+    ax.set_xlabel(zscore)
+```
+
 ```python
 valid_month = 8
 valid_year = 2020
@@ -229,6 +248,36 @@ for leadtime, forecast_date in zip(leadtimes, forecast_dates):
         f"Leadtime: {leadtime} months; "
         f"Valid: {valid_date:%B %Y}"
     )
+```
+
+Now that we've normalized by leadtime, we can compare the forecasts from
+different leadtimes for the same valid time.
+Each point in the plot below is one valid time.
+There is more disagreement in the forecasts (high `std`) for relatively
+high precipitation forecasts (high `mean`).
+
+```python
+df.groupby("valid_time")["zscore_lt"].agg(["mean", "std"]).reset_index().plot(
+    x="mean",
+    y="std",
+    linestyle="None",
+    marker=".",
+    ylabel="Std of forecasts for specific valid time",
+    xlabel="Mean of forecasts for specific valid time",
+)
+```
+
+The disagreement between forecasts does not really vary over time.
+
+```python
+df.groupby("valid_time")["zscore_lt"].agg(["mean", "std"]).reset_index().plot(
+    x="valid_time",
+    y="std",
+    linestyle="None",
+    marker=".",
+    ylabel="Std of forecasts for specific valid time",
+    xlabel="Valid time",
+)
 ```
 
 ## Raster stats
@@ -303,24 +352,7 @@ for adm0 in z_stats["ADM0_CODE"].unique():
     )
 ```
 
-Fortunately, there is less spread among bad forecasts (i.e. low `mean`).
-In other words, forecasts tend to be in more agreement when there
-will be less rain.
-
 ```python
-z_stats.groupby(z_stats["valid_time"].dt.year)["mean"].agg(
-    ["mean", "std"]
-).pivot_table(index="mean", values="std").plot(
-    linestyle="None", marker=".", ylabel="std"
-)
-```
-
-As expected,
-
-```python
-z_stats.groupby([z_stats["valid_time"].dt.month, "leadtime"])[
-    "mean"
-].std().reset_index().pivot_table(
-    index="leadtime", columns="valid_time"
-).plot()
+filename = "ecmwf_total-precipitation_sah_zscore.nc"
+ds.to_netcdf(utils.PROC_ECMWF_DIR / filename)
 ```
