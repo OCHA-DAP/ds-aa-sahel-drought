@@ -18,6 +18,7 @@ from ochanticipy import (
     create_custom_country_config,
 )
 from rasterio.enums import Resampling
+from scipy.stats import zscore
 from shapely import box
 from tqdm import tqdm
 
@@ -37,10 +38,89 @@ PROC_SAH_SEASON_TRI_DIR = PROC_SAH_SEASON_DIR / "trimester_any_sen"
 RAW_ASAP_REF_DIR = DATA_DIR / "public/raw/glb/asap/reference_data"
 RAW_ECMWF_DIR = DATA_DIR / "public" / "raw" / "sah" / "ecmwf"
 PROC_ECMWF_DIR = DATA_DIR / "public" / "processed" / "sah" / "ecmwf"
+PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
 
 
-def process_ecmwf_rank() -> xr.Dataset:
+def load_ecmwf_inseason(publication_date: str):
+    filename = f"sah_ecmwf_zscorelt_aoi_inseason_{publication_date}.tif"
+    da = rxr.open_rasterio(PROC_ECMWF_INSEASON_DIR / filename)
+    da = da.rename({"band": "leadtime", "x": "longitude", "y": "latitude"})
+    return da
+
+
+def process_ecmwf_inseason():
+    filename = "ecmwf_total-precipitation_sah_zscore.nc"
+    ec = xr.load_dataset(PROC_ECMWF_DIR / filename)["zscore_lt"]
+    das = []
+    for month in range(1, 13):
+        da = load_asap_inseason(interval="month", number=month)
+        da["month"] = month
+        das.append(da)
+    season = xr.concat(das, dim="month")
+    season = season.rename({"x": "longitude", "y": "latitude"})
+    for pub_date in tqdm(ec.time.values):
+        pub_date = pd.to_datetime(pub_date)
+        months = [
+            (x - 1) % 12 + 1
+            for x in range(pub_date.month + 1, pub_date.month + 7)
+        ]
+        season_l = season.sel(month=months)
+        season_l = season_l.rename({"month": "leadtime"})
+        season_l["leadtime"] = range(1, 7)
+        ec_i = ec.sel(time=pub_date).interp_like(season_l, method="nearest")
+        ec_season = ec_i * season_l.where(season_l == 1)
+        filename = (
+            f"sah_ecmwf_zscorelt_aoi_inseason_"
+            f"{pub_date.isoformat().split('T')[0]}.tif"
+        )
+        ec_season.rio.to_raster(
+            PROC_ECMWF_INSEASON_DIR / filename, driver="COG"
+        )
     pass
+
+
+def process_ecmwf_zscore():
+    """Calcualte ECMWF zscores"""
+    da = load_ecmwf()
+    ds = da.to_dataset()
+    da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12 + 1
+    # calculate rank and zscore assuming no leadtime bias
+    df = da.to_dataframe().reset_index()
+    df["valid_time"] = df.apply(
+        lambda row: row["time"] + pd.DateOffset(months=row["leadtime"]), axis=1
+    )
+    df_groupby = df.groupby(["valid_month", "latitude", "longitude"])["tprate"]
+    df["rank"] = df_groupby.rank().astype("float32")
+    df["zscore"] = df_groupby.transform(lambda x: zscore(x))
+    # assign back to variable in Dataset
+    # groupby in this case is just to set the index
+    ds[["rank", "zscore"]] = (
+        df.groupby(["leadtime", "time", "latitude", "longitude"])
+        .mean()
+        .to_xarray()[["rank", "zscore"]]
+    )
+    ds = ds.assign_coords(
+        {
+            "valid_time": ds["time"]
+            + ds["leadtime"] * 31 * 24 * 3600 * 1000000000
+        }
+    )
+
+    # calculating rank and zscore taking leadtime bias into account
+    df_groupby = df.groupby(
+        ["leadtime", "valid_month", "latitude", "longitude"]
+    )["tprate"]
+    df["rank_lt"] = df_groupby.rank().astype("float32")
+    df["zscore_lt"] = df_groupby.transform(lambda x: zscore(x))
+    # assign back to variable in Dataset
+    # groupby in this case is just to set the index
+    ds[["rank_lt", "zscore_lt"]] = (
+        df.groupby(["leadtime", "time", "latitude", "longitude"])
+        .mean()
+        .to_xarray()[["rank_lt", "zscore_lt"]]
+    )
+    filename = "ecmwf_total-precipitation_sah_zscore.nc"
+    ds.to_netcdf(PROC_ECMWF_DIR / filename)
 
 
 def load_ecmwf() -> xr.DataArray:
