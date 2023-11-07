@@ -95,6 +95,10 @@ pctile = (rank - 1) / (rank.max() - 1)
 pctile.name = "percentile"
 ```
 
+```python
+df
+```
+
 ## Visualize
 
 We can have a look at the spread of zscores.
@@ -111,7 +115,9 @@ because the precipitation at shorter leadtimes is higher
 (by quite a bit, like 50%!).
 
 ```python
-df.groupby("leadtime")["tprate"].mean().plot()
+(df.groupby("leadtime")["tprate"].mean() * 1000 * 30.5 * 24 * 3600).plot(
+    ylabel="monthly rainfall (mm / month)"
+)
 ```
 
 This is somewhat consistent across valid months too.
@@ -181,6 +187,27 @@ for leadtime, forecast_date in zip(leadtimes, forecast_dates):
         f"Leadtime: {leadtime} months; "
         f"Valid: {valid_date:%B %Y}"
     )
+```
+
+We can also look at a specific pixel (this one is Niamey) to compare with
+source of historical rainfall.
+Here, we see clearly that the rainfall peaks in September.
+In reality, rainfall in Niamey has a strong peak in August,
+which leads me to think that `leadtime=1` should actually correspond
+to the publication month, not the month after.
+
+```python
+(
+    df[(np.round(df["latitude"]) == 13) & (np.round(df["longitude"]) == 2)]
+    .groupby(["leadtime", "valid_month"])["tprate"]
+    .mean()
+    .reset_index()
+    .pivot_table(index="valid_month", columns="leadtime")
+    * 1000
+    * 30.5
+    * 24
+    * 3600
+).plot()
 ```
 
 ## Process by leadtime
