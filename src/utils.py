@@ -36,8 +36,8 @@ PROC_SAH_SEASON_MONTH_DIR = PROC_SAH_SEASON_DIR / "month_any_sen"
 PROC_GLB_SEASON_TRI_DIR = PROC_GLB_SEASON_DIR / "trimester_any_sen"
 PROC_SAH_SEASON_TRI_DIR = PROC_SAH_SEASON_DIR / "trimester_any_sen"
 RAW_ASAP_REF_DIR = DATA_DIR / "public/raw/glb/asap/reference_data"
-RAW_ECMWF_DIR = DATA_DIR / "public" / "raw" / "sah" / "ecmwf"
-PROC_ECMWF_DIR = DATA_DIR / "public" / "processed" / "sah" / "ecmwf"
+RAW_ECMWF_DIR = DATA_DIR / "private" / "raw" / "sah" / "ecmwf"
+PROC_ECMWF_DIR = DATA_DIR / "private" / "processed" / "sah" / "ecmwf"
 PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
 
 
