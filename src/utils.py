@@ -1,3 +1,4 @@
+import datetime
 import itertools
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import pandas as pd
 import rioxarray as rxr
 import xarray as xr
 from ochanticipy import (
+    ChirpsMonthly,
     CodAB,
     GeoBoundingBox,
     IriForecastProb,
@@ -39,6 +41,8 @@ RAW_ASAP_REF_DIR = DATA_DIR / "public/raw/glb/asap/reference_data"
 RAW_ECMWF_DIR = DATA_DIR / "private" / "raw" / "sah" / "ecmwf"
 PROC_ECMWF_DIR = DATA_DIR / "private" / "processed" / "sah" / "ecmwf"
 PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
+PROC_CHIRPS_DIR = DATA_DIR / "public" / "processed" / "sah" / "chirps"
+PROC_CHIRPS_INSEASON_DIR = PROC_CHIRPS_DIR / "inseason"
 
 
 def load_ecmwf_inseason(publication_date: str):
@@ -48,9 +52,11 @@ def load_ecmwf_inseason(publication_date: str):
     return da
 
 
-def process_ecmwf_inseason():
-    filename = "ecmwf_total-precipitation_sah_zscore.nc"
-    ec = xr.load_dataset(PROC_ECMWF_DIR / filename)["zscore_lt"]
+def load_asap_inseason_allmonths() -> xr.DataArray:
+    """Loads all months of ASAP inseason
+    Uses "any" aggregation
+    (i.e., month is in season if any of its dekads are inseason)
+    """
     das = []
     for month in range(1, 13):
         da = load_asap_inseason(interval="month", number=month)
@@ -58,6 +64,13 @@ def process_ecmwf_inseason():
         das.append(da)
     season = xr.concat(das, dim="month")
     season = season.rename({"x": "longitude", "y": "latitude"})
+    return season
+
+
+def process_ecmwf_inseason():
+    filename = "ecmwf_total-precipitation_sah_zscore.nc"
+    ec = xr.load_dataset(PROC_ECMWF_DIR / filename)["zscore_lt"]
+    season = load_asap_inseason_allmonths()
     for pub_date in tqdm(ec.time.values):
         pub_date = pd.to_datetime(pub_date)
         months = [
@@ -76,7 +89,6 @@ def process_ecmwf_inseason():
         ec_season.rio.to_raster(
             PROC_ECMWF_INSEASON_DIR / filename, driver="COG"
         )
-    pass
 
 
 def process_ecmwf_zscore():
@@ -127,7 +139,7 @@ def load_ecmwf() -> xr.DataArray:
     filename = "ecmwf_total-precipitation_sah.nc"
     ds = xr.open_dataset(PROC_ECMWF_DIR / filename)
     da = ds["tprate"]
-    da.rio.set_crs(4326, inplace=True)
+    da.rio.write_crs(4326, inplace=True)
     da = da.drop_vars("surface")
     return da
 
@@ -159,6 +171,7 @@ def download_ecmwf():
     c = cdsapi.Client()
     aoi = load_codab(aoi_only=True)
     bounds = aoi.total_bounds
+    # Note: there is a problem with the bounding box, needs to be enlarged
     area = [bounds[3], bounds[0], bounds[1], bounds[2]]
     start_year = 1981
     end_year = 2022
@@ -274,6 +287,112 @@ def process_iri_aoi_lowtercile():
     if filepath.exists():
         filepath.unlink()
     da_aoi.to_netcdf(filepath)
+
+
+def load_chirps_inseason(
+    valid_date: str, variable: Literal["actual_precipitation", "zscore"]
+) -> xr.DataArray:
+    """Load raster of monthly CHIRPS masked by inseason for that month.
+
+    Parameters
+    ----------
+    valid_date: str
+        The date of the raster (set day = 1)
+    variable: Literal["actual_precipitation", "zscore"]
+        The variable to load.
+
+    Returns
+    -------
+    xr.DataArray
+    """
+    filename = f"sah_chirps_monthly_aoi_inseason_{variable}_{valid_date}.tif"
+    da = rxr.open_rasterio(
+        PROC_CHIRPS_INSEASON_DIR / variable / filename
+    ).squeeze(drop=True)
+    da = da.rename({"x": "longitude", "y": "latitude"})
+    return da
+
+
+def process_chirps_inseason(
+    variable: Literal["actual_precipitation", "zscore"]
+):
+    """Process CHIRPS by masking with ASAP inseason"""
+    # Note: this function outputs to multiple COGs, instead of one NetCDF.
+    # This is to keep the file size down (COGs seem to be way smaller than
+    # NetCDFs of the same dimension and dtype), and also to stay consistent
+    # with previous analysis of IRI forecasts. It also seems like COGs are
+    # easier to work with in R than NetCDFs.
+    chirps = load_chirps()
+    season = load_asap_inseason_allmonths()
+    for valid_date in tqdm(chirps.valid_date):
+        valid_month = valid_date.dt.month.values
+        season_f = season.where(season == 1).sel(month=valid_month)
+        da_interp = (
+            chirps[variable].sel(valid_date=valid_date).interp_like(season_f)
+            * season_f
+        )
+        filename = (
+            f"sah_chirps_monthly_aoi_inseason_{variable}_"
+            f"{pd.to_datetime(valid_date.values).date()}.tif"
+        )
+        save_dir = PROC_CHIRPS_INSEASON_DIR / variable
+        da_interp.rio.to_raster(save_dir / filename, driver="COG")
+
+
+def load_chirps() -> xr.Dataset:
+    """Load CHIRPS (including zscore)"""
+    filename = "sah_chirps_monthly_all_zscore.nc"
+    ds = xr.open_dataset(PROC_CHIRPS_DIR / filename)
+    return ds
+
+
+def process_chirps_zscore():
+    """Calculate CHIRPS zscore by pixel and month"""
+    filename = "sah_chirps_monthly_all.nc"
+    ds = xr.open_dataset(PROC_CHIRPS_DIR / filename)
+    df = ds["actual_precipitation"].to_dataframe().reset_index()
+    df_groupby = df.groupby(
+        [df["valid_date"].dt.month, "latitude", "longitude"]
+    )["actual_precipitation"]
+    df["zscore"] = (
+        df["actual_precipitation"] - df_groupby.transform("mean")
+    ) / df_groupby.transform("std")
+    ds["zscore"] = (
+        df.groupby(["valid_date", "latitude", "longitude"])
+        .mean()
+        .to_xarray()["zscore"]
+    )
+    filename = "sah_chirps_monthly_all_zscore.nc"
+    ds.to_netcdf(PROC_CHIRPS_DIR / filename)
+
+
+def download_and_process_chirps():
+    """Use AnticiPy to download and process CHIRPS
+    Combines all into one NetCDF
+    """
+    # Note: .download() requires Python 3.9
+    aoi = load_codab(aoi_only=True)
+    country_config = create_custom_country_config("../sah.yaml")
+    geobb = GeoBoundingBox.from_shape(aoi)
+    chirps = ChirpsMonthly(
+        country_config=country_config, geo_bounding_box=geobb
+    )
+    chirps.download()
+    chirps.process()
+
+    ch_df = chirps.load().to_dataframe()["precipitation"]
+    ch_df = ch_df.reset_index()
+    ch_df["valid_date"] = ch_df["valid_time"].apply(
+        lambda x: datetime.date(x.year, x.month, 1)
+    )
+    ch_df = ch_df.drop(columns="valid_time")
+    ch_df["valid_date"] = pd.to_datetime(ch_df["valid_date"])
+    ch_df = ch_df.rename(columns={"precipitation": "actual_precipitation"})
+    ch_df = ch_df.groupby(["valid_date", "latitude", "longitude"]).first()
+    ch_da = ch_df.to_xarray()["actual_precipitation"]
+
+    filename = "sah_chirps_monthly_all.nc"
+    ch_da.to_netcdf(PROC_CHIRPS_DIR / filename)
 
 
 def load_iri() -> xr.DataArray:

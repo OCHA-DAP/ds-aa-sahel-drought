@@ -45,6 +45,16 @@ DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
 ```
 
 ```python
+test = xr.load_dataset(
+    utils.RAW_ECMWF_DIR / "ecmwf-total-leadtime-1_sys51.grib"
+)
+```
+
+```python
+test
+```
+
+```python
 aoi = utils.load_codab(aoi_only=True)
 ```
 
