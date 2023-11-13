@@ -24,6 +24,8 @@ Support for ECMWF analysis in LAC. Actual processing steps are also in LAC repo.
 ```
 
 ```python
+import os
+
 import geopandas as gpd
 import rioxarray as rxr
 import xarray as xr
@@ -74,6 +76,10 @@ LAC_PROC_CLIP_TIF_DIR = (
 ```
 
 ```python
+da_in.rio.crs
+```
+
+```python
 # read in GRIBs
 
 dap_s = []
@@ -100,35 +106,46 @@ da = da.rio.clip(lac_aoi.geometry, all_touched=True)
 ```
 
 ```python
+# change leadtime name, and reshape to multiple variables
+# this is so when saving, the leadtime names show up as the band names
+
+da["leadtime"] = [f"lt{x}" for x in da["leadtime"].astype(int).values]
+df = da.to_dataframe().reset_index()
+df = df.drop(columns=["surface", "spatial_ref"])
+da = df.pivot_table(
+    index=["time", "latitude", "longitude"],
+    columns="leadtime",
+    values="tprate",
+).to_xarray()
+```
+
+```python
 # output TIFs
-for pub_date in da["time"]:
-    da_out = da.sel(time=pub_date)["tprate"]
+for pub_date in da_test["time"]:
+    da_out = da.sel(time=pub_date)
     filename = f"ecmwf_forecast_{pub_date.dt.date.values}_aoi.tif"
     print(filename)
     da_out.rio.to_raster(LAC_PROC_CLIP_TIF_DIR / filename, driver="COG")
 ```
 
 ```python
-da.isel(time=0, leadtime=0)["tprate"].plot()
-```
-
-```python
+# output TIFs
+#
 for pub_date in da["time"]:
     da_out = da.sel(time=pub_date)["tprate"]
     filename = f"ecmwf_forecast_{pub_date.dt.date.values}_aoi.tif"
     print(filename)
     da_out.rio.to_raster(LAC_PROC_CLIP_TIF_DIR / filename, driver="COG")
-    # display(da_out)
-```
-
-```python
-da_out.isel(leadtime=5).plot()
 ```
 
 ```python
 test = rxr.open_rasterio(
-    LAC_PROC_CLIP_TIF_DIR / "ecmwf_forecast_2022-04-01_aoi.tif"
+    LAC_PROC_CLIP_TIF_DIR / "ecmwf_forecast_2022-04-01_aoi_test.tif"
 )
+```
+
+```python
+test
 ```
 
 ```python
