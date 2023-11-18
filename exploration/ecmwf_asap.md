@@ -37,7 +37,7 @@ from src import utils
 ```python
 # utils.clip_asap_inseason_month()
 # utils.process_ecmwf_zscore()
-# utils.process_ecmwf_inseason()
+utils.process_ecmwf_inseason()
 ```
 
 ```python
@@ -76,9 +76,11 @@ stats = pd.concat(dfs)
 
 ```python
 stats["pub_date"] = pd.to_datetime(stats["pub_date"])
+# note that for leadtime = 1, valid_date = pub_date
+# this is because of ECMWF forecast indexing
 stats["valid_date"] = pd.to_datetime(
     stats["pub_date"]
-    + stats["leadtime"].apply(lambda x: pd.DateOffset(months=x))
+    + stats["leadtime"].apply(lambda x: pd.DateOffset(months=x - 1))
 )
 ```
 

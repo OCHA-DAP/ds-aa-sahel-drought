@@ -43,6 +43,74 @@ PROC_ECMWF_DIR = DATA_DIR / "private" / "processed" / "sah" / "ecmwf"
 PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
 PROC_CHIRPS_DIR = DATA_DIR / "public" / "processed" / "sah" / "chirps"
 PROC_CHIRPS_INSEASON_DIR = PROC_CHIRPS_DIR / "inseason"
+RAW_BADYEARS_DIR = DATA_DIR / "public" / "raw" / "sah" / "bad_years"
+
+
+def calc_zscore(x):
+    return (x - x.mean()) / x.std()
+
+
+def calc_abs_anom(x):
+    return x - x.mean()
+
+
+def process_ecmwf_reanalysis():
+    """Process ECMWF reanalysis by taking zscore, rank, absolute anomaly,
+    and percentile
+    """
+    ds = xr.load_dataset(
+        RAW_ECMWF_DIR / "ecmwf-reanalysis-monthly-precipitation.grib"
+    )
+    ds = ds.swap_dims({"time": "valid_time"})
+    df = ds["tp"].to_dataframe()["tp"].reset_index()
+    groupby = df.groupby(["latitude", "longitude"])["tp"]
+    df["zscore"] = groupby.transform(calc_zscore)
+    df["rank"] = groupby.transform("rank")
+    df["abs_anom"] = groupby.transform(calc_abs_anom)
+    df["pct"] = df["rank"] / df["valid_time"].nunique()
+    cols = ["zscore", "rank", "abs_anom", "pct"]
+    ds[cols] = df.set_index(
+        ["valid_time", "latitude", "longitude"]
+    ).to_xarray()[cols]
+    filename = "ecmwf-reanalysis-monthly-precipitation_processed.nc"
+    ds.to_netcdf(PROC_ECMWF_DIR / filename)
+
+
+def download_ecmwf_reanalysis():
+    """Downloads ECMWF ERA5 reanalysis of total monthly precipitation"""
+    c = cdsapi.Client()
+    aoi = load_codab(aoi_only=True)
+    bounds = aoi.total_bounds
+    # Note: there is a problem with the bounding box, needs to be enlarged
+    area = [bounds[3] + 1, bounds[0], bounds[1], bounds[2] + 1]
+    start_year = 1981
+    end_year = 2022
+    fileformat = "grib"
+    data_request_netcdf = {
+        "format": fileformat,
+        "variable": "total_precipitation",
+        "product_type": "monthly_averaged_reanalysis",
+        "year": [f"{d}" for d in range(start_year, end_year + 1)],
+        "month": [f"{d:02d}" for d in range(1, 13)],
+        "area": area,
+        "time": "00:00",
+    }
+    filename = f"ecmwf-reanalysis-monthly-precipitation.{fileformat}"
+    c.retrieve(
+        "reanalysis-era5-single-levels-monthly-means",
+        data_request_netcdf,
+        RAW_ECMWF_DIR / filename,
+    )
+
+
+def load_bad_years():
+    dfs = []
+    for adm in ["ner"]:
+        filename = f"{adm}_bad_years.csv"
+        df_in = pd.read_csv(RAW_BADYEARS_DIR / filename)
+        df_in["ADM0_CODE"] = adm.upper()
+        dfs.append(df_in)
+    return pd.concat(dfs, ignore_index=True)
 
 
 def load_ecmwf_inseason(publication_date: str):
@@ -67,23 +135,43 @@ def load_asap_inseason_allmonths() -> xr.DataArray:
     return season
 
 
-def process_ecmwf_inseason():
-    filename = "ecmwf_total-precipitation_sah_zscore.nc"
-    ec = xr.load_dataset(PROC_ECMWF_DIR / filename)["zscore_lt"]
+def process_ecmwf_inseason(
+    product: Literal["forecast", "reanalysis"],
+    variable: Literal[
+        "zscore", "zscore_lt", "rank", "tp", "tprate", "pct", "abs_anom"
+    ],
+):
+    if product == "forecast":
+        filename = "ecmwf_total-precipitation_sah_zscore.nc"
+        time_var = "time"
+    else:
+        filename = "ecmwf-reanalysis-monthly-precipitation_processed.nc"
+        time_var = "valid_time"
+    ec = xr.load_dataset(PROC_ECMWF_DIR / filename)[variable]
     season = load_asap_inseason_allmonths()
-    for pub_date in tqdm(ec.time.values):
+    for pub_date in tqdm(ec[time_var].values):
         pub_date = pd.to_datetime(pub_date)
-        months = [
-            (x - 1) % 12 + 1
-            for x in range(pub_date.month + 1, pub_date.month + 7)
-        ]
-        season_l = season.sel(month=months)
-        season_l = season_l.rename({"month": "leadtime"})
-        season_l["leadtime"] = range(1, 7)
-        ec_i = ec.sel(time=pub_date).interp_like(season_l, method="nearest")
+        if product == "forecast":
+            # Note: relevant months loaded correspond to
+            # pub_date.month : pub_date.month + 5.
+            # This is because in ECMWF seasonal forecast, leadtime = 1
+            # corresponds to pub_date.month.
+            months = [
+                (x - 1) % 12 + 1
+                for x in range(pub_date.month, pub_date.month + 6)
+            ]
+            season_l = season.sel(month=months)
+            season_l = season_l.rename({"month": "leadtime"})
+            season_l["leadtime"] = range(1, 7)
+        else:
+            season_l = season.sel(month=pub_date.month)
+        ec_i = ec.loc[{time_var: pub_date}].interp_like(
+            season_l, method="nearest"
+        )
         ec_season = ec_i * season_l.where(season_l == 1)
+
         filename = (
-            f"sah_ecmwf_zscorelt_aoi_inseason_"
+            f"sah_ecmwf_{product}_{variable}_aoi_inseason_"
             f"{pub_date.isoformat().split('T')[0]}.tif"
         )
         ec_season.rio.to_raster(
