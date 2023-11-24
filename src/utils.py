@@ -20,7 +20,6 @@ from ochanticipy import (
     create_custom_country_config,
 )
 from rasterio.enums import Resampling
-from scipy.stats import zscore
 from shapely import box
 from tqdm import tqdm
 
@@ -46,12 +45,51 @@ PROC_CHIRPS_INSEASON_DIR = PROC_CHIRPS_DIR / "inseason"
 RAW_BADYEARS_DIR = DATA_DIR / "public" / "raw" / "sah" / "bad_years"
 
 
-def calc_zscore(x):
+def calc_quantile(df, q, col, agg_cols):
+    """Groups by agg_cols, adds boolean column if value is in quantile"""
+    return (
+        df.groupby(agg_cols)
+        .apply(lambda g: is_in_quantile(g, q, col))
+        .reset_index(drop=True)
+    )
+
+
+def is_in_quantile(group, q, col):
+    """Adds boolean column to group if value is in quantile"""
+    q_str = int(q * 100)
+    group[f"{col}_q{q_str}"] = group[col] <= group[col].quantile(q)
+    return group
+
+
+def calc_zscore(x: pd.Series) -> pd.Series:
+    """Calculates z-score for series"""
     return (x - x.mean()) / x.std()
 
 
-def calc_abs_anom(x):
+def calc_abs_anom(x: pd.Series) -> pd.Series:
+    """Calculates absolute anomaly for series"""
     return x - x.mean()
+
+
+def calculate_ecmwf_reanalysis_inseason_stats():
+    aoi = load_codab(aoi_only=True)
+    dfs = []
+    for year in tqdm(range(1981, 2023)):
+        das = []
+        for month in range(1, 13):
+            da_in = load_ecmwf_inseason(
+                product="reanalysis",
+                publication_date=f"{year}-{month:02}-01",
+                variable="tp",
+            )
+            da_in["month"] = month
+            das.append(da_in)
+        da = xr.concat(das, dim="month")
+        df_in = da.oap.compute_raster_stats(aoi, feature_col="ADM0_CODE")
+        df_in["year"] = year
+        dfs.append(df_in)
+
+    # df = pd.concat(dfs, ignore_index=True)
 
 
 def process_ecmwf_reanalysis():
@@ -63,10 +101,10 @@ def process_ecmwf_reanalysis():
     )
     ds = ds.swap_dims({"time": "valid_time"})
     df = ds["tp"].to_dataframe()["tp"].reset_index()
-    groupby = df.groupby(["latitude", "longitude"])["tp"]
-    df["zscore"] = groupby.transform(calc_zscore)
-    df["rank"] = groupby.transform("rank")
-    df["abs_anom"] = groupby.transform(calc_abs_anom)
+    df_groupby = df.groupby(["latitude", "longitude"])["tp"]
+    df["zscore"] = df_groupby.transform(calc_zscore)
+    df["rank"] = df_groupby.transform("rank")
+    df["abs_anom"] = df_groupby.transform(calc_abs_anom)
     df["pct"] = df["rank"] / df["valid_time"].nunique()
     cols = ["zscore", "rank", "abs_anom", "pct"]
     ds[cols] = df.set_index(
@@ -113,10 +151,40 @@ def load_bad_years():
     return pd.concat(dfs, ignore_index=True)
 
 
-def load_ecmwf_inseason(publication_date: str):
-    filename = f"sah_ecmwf_zscorelt_aoi_inseason_{publication_date}.tif"
+def load_ecmwf_inseason(
+    product: Literal["forecast", "reanalysis"],
+    variable: Literal[
+        "zscore", "zscore_lt", "rank", "tp", "tprate", "pct", "abs_anom"
+    ],
+    publication_date: str,
+):
+    """Process ECMWF inseason rasters
+
+    Parameters
+    ----------
+    product: Literal["forecast", "reanalysis"]
+        Load seasonal forecasts, or reanalysis.
+    variable: Literal[
+        "zscore", "zscore_lt", "rank", "tp", "tprate", "pct", "abs_anom"
+    ],
+        Which variable to load. "tprate" is only for forecast, "tp" is only
+        for reanalysis.
+    publication_date: str
+        Publication date of data. For reanalysis, publication date is also
+        relevant date.
+
+    Returns
+    -------
+
+    """
+    filename = (
+        f"sah_ecmwf_{product}_{variable}_aoi_inseason_{publication_date}.tif"
+    )
     da = rxr.open_rasterio(PROC_ECMWF_INSEASON_DIR / filename)
-    da = da.rename({"band": "leadtime", "x": "longitude", "y": "latitude"})
+    if product == "forecast":
+        da = da.rename({"band": "leadtime", "x": "longitude", "y": "latitude"})
+    else:
+        da = da.squeeze(drop=True)
     return da
 
 
@@ -141,6 +209,22 @@ def process_ecmwf_inseason(
         "zscore", "zscore_lt", "rank", "tp", "tprate", "pct", "abs_anom"
     ],
 ):
+    """Process ECMWF inseason rasters
+
+    Parameters
+    ----------
+    product: Literal["forecast", "reanalysis"]
+        Process seasonal forecasts, or reanalysis.
+    variable: Literal[
+        "zscore", "zscore_lt", "rank", "tp", "tprate", "pct", "abs_anom"
+    ],
+        Which variable to process. "tprate" is only for forecast, "tp" is only
+        for reanalysis.
+
+    Returns
+    -------
+
+    """
     if product == "forecast":
         filename = "ecmwf_total-precipitation_sah_zscore.nc"
         time_var = "time"
@@ -183,44 +267,47 @@ def process_ecmwf_zscore():
     """Calcualte ECMWF zscores"""
     da = load_ecmwf()
     ds = da.to_dataset()
-    da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12 + 1
+    da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12
+
     # calculate rank and zscore assuming no leadtime bias
     df = da.to_dataframe().reset_index()
     df["valid_time"] = df.apply(
         lambda row: row["time"] + pd.DateOffset(months=row["leadtime"]), axis=1
     )
+
     df_groupby = df.groupby(["valid_month", "latitude", "longitude"])["tprate"]
-    df["rank"] = df_groupby.rank().astype("float32")
-    df["zscore"] = df_groupby.transform(lambda x: zscore(x))
+    df["zscore"] = df_groupby.transform(calc_zscore)
+    df["rank"] = df_groupby.transform("rank")
     # assign back to variable in Dataset
     # groupby in this case is just to set the index
-    ds[["rank", "zscore"]] = (
-        df.groupby(["leadtime", "time", "latitude", "longitude"])
-        .mean()
-        .to_xarray()[["rank", "zscore"]]
-    )
-    ds = ds.assign_coords(
-        {
-            "valid_time": ds["time"]
-            + ds["leadtime"] * 31 * 24 * 3600 * 1000000000
-        }
-    )
+    ds[["rank", "zscore"]] = df.set_index(
+        ["leadtime", "time", "latitude", "longitude"]
+    ).to_xarray()[["rank", "zscore"]]
 
     # calculating rank and zscore taking leadtime bias into account
     df_groupby = df.groupby(
         ["leadtime", "valid_month", "latitude", "longitude"]
     )["tprate"]
-    df["rank_lt"] = df_groupby.rank().astype("float32")
-    df["zscore_lt"] = df_groupby.transform(lambda x: zscore(x))
+    df["zscore_lt"] = df_groupby.transform(calc_zscore)
+    df["rank_lt"] = df_groupby.transform("rank")
+    df["abs_anom_lt"] = df_groupby.transform(calc_abs_anom)
+    df["pct_lt"] = df_groupby.transform("rank", pct=True)
+    print(df)
     # assign back to variable in Dataset
-    # groupby in this case is just to set the index
-    ds[["rank_lt", "zscore_lt"]] = (
-        df.groupby(["leadtime", "time", "latitude", "longitude"])
-        .mean()
-        .to_xarray()[["rank_lt", "zscore_lt"]]
-    )
+    ds_vars = ["rank_lt", "zscore_lt", "abs_anom_lt", "pct_lt"]
+    ds[ds_vars] = df.set_index(
+        ["leadtime", "time", "latitude", "longitude"]
+    ).to_xarray()[ds_vars]
+
+    # sometimes xarray throws an error about grid_mapping
+    for var in list(ds.data_vars):
+        if "grid_mapping" in ds[var].attrs:
+            del ds[var].attrs["grid_mapping"]
     filename = "ecmwf_total-precipitation_sah_zscore.nc"
-    ds.to_netcdf(PROC_ECMWF_DIR / filename)
+    filepath = PROC_ECMWF_DIR / filename
+    if filepath.exists():
+        filepath.unlink()
+    ds.to_netcdf(filepath)
 
 
 def load_ecmwf() -> xr.DataArray:
@@ -260,7 +347,7 @@ def download_ecmwf():
     aoi = load_codab(aoi_only=True)
     bounds = aoi.total_bounds
     # Note: there is a problem with the bounding box, needs to be enlarged
-    area = [bounds[3], bounds[0], bounds[1], bounds[2]]
+    area = [bounds[3] + 1, bounds[0], bounds[1], bounds[2] + 1]
     start_year = 1981
     end_year = 2022
     leadtimes = range(1, 7)

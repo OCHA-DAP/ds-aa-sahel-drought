@@ -59,6 +59,10 @@ for d in range(1, end):
 season = xr.concat(das, dim=TIME_INTERVAL)
 ```
 
+```python
+aoi = utils.load_codab(aoi_only=True)
+```
+
 ## Process Data
 
 Here we count the pixels in each admin:
@@ -146,7 +150,7 @@ for inseason_threshold in np.linspace(0, 1, 500):
 months_inseason = pd.concat(dfs).reset_index()
 
 fig, axs = plt.subplots(
-    3, 1, sharex=True, constrained_layout=True, figsize=(8, 10)
+    3, 1, sharex=True, constrained_layout=True, figsize=(5, 5)
 )
 for ax, adm0 in zip(axs, ["BFA", "NER", "TCD"]):
     months_inseason[months_inseason[ADM_LEVEL] == adm0].plot(
@@ -159,7 +163,8 @@ for ax, adm0 in zip(axs, ["BFA", "NER", "TCD"]):
     ax.set_yticks(range(5, 12))
     ax.set_xticks(np.arange(0, 1.1, 0.1))
     ax.set_xbound([0, 1])
-    ax.set_ylabel("months in season")
+    ax.set_ylabel("months\nin season")
+    ax.get_legend().remove()
 ```
 
 ```python

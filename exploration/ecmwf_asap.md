@@ -37,7 +37,21 @@ from src import utils
 ```python
 # utils.clip_asap_inseason_month()
 # utils.process_ecmwf_zscore()
-utils.process_ecmwf_inseason()
+# utils.process_ecmwf_inseason(product="forecast", variable="zscore_lt")
+utils.process_ecmwf_inseason(product="forecast", variable="pct_lt")
+```
+
+```python
+filename = "ecmwf_total-precipitation_sah_zscore.nc"
+ds = xr.load_dataset(utils.PROC_ECMWF_DIR / filename)
+```
+
+```python
+ds
+```
+
+```python
+ds["pct_lt"].plot.hist(bins=10)
 ```
 
 ```python
@@ -45,11 +59,10 @@ aoi = utils.load_codab(aoi_only=True)
 ```
 
 ```python
-aoi_0 = aoi.dissolve("ADM0_CODE").reset_index()
-```
-
-```python
-aoi_0
+da = utils.load_ecmwf_inseason("forecast", "pct_lt", "2020-08-01")
+fig, ax = plt.subplots(figsize=(25, 5))
+aoi.boundary.plot(ax=ax, color="k")
+da.sel(leadtime=4).plot(ax=ax)
 ```
 
 ```python
@@ -63,7 +76,9 @@ for year in tqdm(years):
         pub_date_str = f"{year}-{month:02d}-01"
         # December is missing for 2019, 2020, and 2021, so skip
         try:
-            da_in = utils.load_ecmwf_inseason(pub_date_str)
+            da_in = utils.load_ecmwf_inseason(
+                "forecast", "zscore_lt", pub_date_str
+            )
         except:
             print(f"couldn't open {pub_date_str}")
             continue

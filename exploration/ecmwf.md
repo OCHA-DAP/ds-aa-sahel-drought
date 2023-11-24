@@ -54,10 +54,6 @@ test = xr.load_dataset(
 test
 ```
 
-```python
-aoi = utils.load_codab(aoi_only=True)
-```
-
 ## Process data
 
 Calculate the rank and zscore for `tprate`. This is done over `valid_month`
@@ -392,4 +388,28 @@ for adm0 in z_stats["ADM0_CODE"].unique():
 ```python
 filename = "ecmwf_total-precipitation_sah_zscore.nc"
 ds.to_netcdf(utils.PROC_ECMWF_DIR / filename)
+```
+
+```python
+da = utils.load_ecmwf()
+ds = da.to_dataset()
+da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12
+```
+
+```python
+df = da.to_dataframe().reset_index()
+df["valid_time"] = df.apply(
+    lambda row: row["time"] + pd.DateOffset(months=row["leadtime"]), axis=1
+)
+```
+
+```python
+df_groupby = df.groupby(["leadtime", "valid_month", "latitude", "longitude"])[
+    "tprate"
+]
+```
+
+```python
+for index, group in df_groupby:
+    display(group)
 ```
