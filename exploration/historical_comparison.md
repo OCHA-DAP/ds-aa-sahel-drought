@@ -268,24 +268,28 @@ leadtime_name = "season_lt"
 actual_bool = f"{actual_name}_q33"
 pred_bool = f"{pred_name}_q{q_pred}"
 
-dfs = []
+corrs = []
 for (lt, adm), group in compare.groupby([leadtime_name, "ADM0_CODE"]):
-    class_rep = classification_report(
-        group[actual_bool], group[pred_bool], output_dict=True
-    ).get("True")
-    corr = group[actual_name].corr(group[pred_name])
-    df_add = pd.DataFrame(class_rep, index=[0])
-    df_add[[leadtime_name, "ADM0_CODE", "corr"]] = lt, adm, corr
-    dfs.append(df_add)
+    corr = utils.calc_confusion(group, actual_bool, pred_bool)
+    corr["ADM0_CODE"] = adm
+    corr[leadtime_name] = lt
+    num_corr = group[actual_name].corr(group[pred_name])
+    corr["num_corr"] = num_corr
+    corrs.append(corr)
 
-scores = pd.concat(dfs, ignore_index=True)
+scores = pd.DataFrame(corrs)
 
-metric = "precision"
+metric = "PPV"
 scores.pivot_table(
     index=leadtime_name, columns="ADM0_CODE", values=metric
 ).plot(title=f"{metric} between {actual_name} and {pred_name}, q={q_pred}")
 
-metric = "corr"
+metric = "num_corr"
+scores.pivot_table(
+    index=leadtime_name, columns="ADM0_CODE", values=metric
+).plot(title=f"{metric} between {actual_name} and {pred_name}")
+
+metric = "MCC"
 scores.pivot_table(
     index=leadtime_name, columns="ADM0_CODE", values=metric
 ).plot(title=f"{metric} between {actual_name} and {pred_name}")
@@ -323,9 +327,10 @@ compare
 ```
 
 ```python
-thresh_step = 0.05
+thresh_steps = np.linspace(0, 1, 51)
 n_lts = 4
-threshs = np.linspace(thresh_step * (n_lts - 1), 1, 5)
+n_threshs = 51
+
 lt_name = "season_lt"
 pred_name = "ec_season_mean"
 actual_name = "ec_re_mean"
@@ -333,32 +338,93 @@ actual_name = "ec_re_mean"
 actual_bool = f"{actual_name}_q33"
 
 triggers = compare.copy()
-dfs = []
+confs = []
 
-for thresh in threshs:
-    lt_threshs = -np.arange(0, n_lts) * thresh_step + thresh
-    triggers["lt_thresh"] = triggers[lt_name].apply(
-        lambda x: lt_threshs[x - 1]
+for thresh_step in thresh_steps:
+    # print(thresh_step)
+    threshs = np.linspace(0, 1 + (n_lts - 1) * thresh_step, n_threshs)
+    # print(threshs)
+    for thresh in threshs:
+        lt_threshs = thresh - np.arange(0, n_lts) * thresh_step
+        # print(lt_threshs)
+        triggers["lt_thresh"] = triggers[lt_name].apply(
+            lambda x: lt_threshs[x - 1]
+        )
+        triggers["trigger"] = triggers[pred_name] < triggers["lt_thresh"]
+        for adm, group in triggers.groupby("ADM0_CODE"):
+            df_add = group.pivot(
+                columns=lt_name, index="year", values="trigger"
+            )
+            df_add["any_pred_trigger"] = df_add.any(axis=1)
+            df_add["actual"] = group.groupby("year")[actual_bool].first()
+            conf = utils.calc_confusion(df_add, "actual", "any_pred_trigger")
+            conf["thresh_step"] = thresh_step
+            conf["thresh"] = thresh
+            conf["ADM0_CODE"] = adm
+            confs.append(conf)
+
+df_conf = pd.DataFrame(confs)
+```
+
+```python
+df_conf.pivot_table(
+    index="thresh_step", columns="ADM0_CODE", values="MCC"
+).plot()
+```
+
+```python
+confs_3rp = []
+for (adm, thresh_step), group in df_conf.groupby(["ADM0_CODE", "thresh_step"]):
+    mcc = np.interp(1 / 3, group["activation"], group["MCC"])
+    confs_3rp.append(
+        {"MCC": mcc, "ADM0_CODE": adm, "thresh_step": thresh_step}
     )
-    triggers["trigger"] = triggers[pred_name] < triggers["lt_thresh"]
+
+df_confs_3rp = pd.DataFrame(confs_3rp)
+df_confs_3rp.pivot_table(
+    index="thresh_step", columns="ADM0_CODE", values="MCC"
+).plot()
+```
+
+```python
+# only considering certain leadtimes
+
+lt_name = "season_lt"
+
+triggers = compare.copy()
+
+confs = []
+
+for thresh in np.linspace(0, 1, 21):
+    triggers["trigger"] = triggers[pred_name] < thresh
     for adm, group in triggers.groupby("ADM0_CODE"):
         df_add = group.pivot(columns=lt_name, index="year", values="trigger")
-        df_add["any_pred_trigger"] = df_add.any(axis=1)
         df_add["actual"] = group.groupby("year")[actual_bool].first()
-        print(df_add)
-
-
-triggers
+        for lt in triggers[lt_name].unique():
+            rel_lts = range(1, lt + 1)
+            df_add["pred_any_rel"] = df_add[rel_lts].any(axis=1)
+            conf = utils.calc_confusion(df_add, "actual", "pred_any_rel")
+            conf["lt_lte"] = lt
+            conf["thresh"] = thresh
+            conf["ADM0_CODE"] = adm
+            confs.append(conf)
+df_conf = pd.DataFrame(confs)
 ```
 
 ```python
-test = pd.DataFrame()
-test["actual"] = [True, True]
-test["pred"] = [False, False]
+df_conf.pivot_table(index="lt_lte", columns="ADM0_CODE", values="MCC").plot()
 ```
 
 ```python
-utils.calc_confusion(test, "actual", "pred")
+confs_3rp = []
+for (adm, lt_lte), group in df_conf.groupby(["ADM0_CODE", "lt_lte"]):
+    mcc = np.interp(1 / 3, group["activation"], group["MCC"])
+    confs_3rp.append({"MCC": mcc, "ADM0_CODE": adm, "lt_lte": lt_lte})
+
+df_confs_3rp = pd.DataFrame(confs_3rp)
+df_confs_3rp.pivot_table(
+    index="lt_lte", columns="ADM0_CODE", values="MCC"
+).plot()
 ```
 
 ```python

@@ -47,9 +47,56 @@ RAW_BADYEARS_DIR = DATA_DIR / "public" / "raw" / "sah" / "bad_years"
 
 
 def calc_confusion(df: pd.DataFrame, actual_col: str, pred_col: str) -> dict:
+    """Calculate various confusion matrix metrics from dataframe.
+    For variable naming see:
+    https://en.wikipedia.org/wiki/Confusion_matrix
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        Input dataframe
+    actual_col: str
+        Column name for actual values
+    pred_col: str
+        Column name for predicted values
+
+    Returns
+    -------
+    dict of metrics
+    """
     conf = confusion_matrix(df[actual_col], df[pred_col])
-    print(conf)
-    return {}
+    TP = conf[1][1]
+    FN = conf[1][0]
+    FP = conf[0][1]
+    TN = conf[0][0]
+    PP = TP + FP
+    PN = FN + TN
+    P = TP + FN
+    N = TN + FP
+    population = P + N
+    np.seterr(invalid="ignore")
+    TPR = TP / P
+    FNR = FN / P
+    FPR = FP / N
+    TNR = TN / N
+    prevalence = P / population
+    PPV = TP / PP
+    FOR = FN / PN
+    LRP = TPR / FPR
+    LRN = FNR / TNR
+    ACC = (TP + TN) / population
+    FDR = FP / PP
+    NPV = TN / PN
+    MK = PPV + NPV + 1
+    DOR = LRP / LRN
+    BA = (TPR + TNR) / 2
+    F1 = 2 * TP / (2 * TP + FP + FN)
+    FM = np.sqrt(PPV * TPR)
+    MCC = np.sqrt(TPR * TNR * PPV * NPV) - np.sqrt(FNR * FPR * FOR * FDR)
+    TS = TP / (TP + FN + FP)
+    activation = PP / population
+    del conf, df, actual_col, pred_col
+    return locals()
 
 
 def calc_quantile(df, q, col, agg_cols):
