@@ -91,7 +91,7 @@ ec_re = ec_re.rename(columns={"monthly_mean": "ec_re_mean"})
 ### ECMWF
 
 ```python
-filename = "ecmwf_inseason_adm0_rasterstats.csv"
+filename = "ecmwf_forecast_pct_lt_inseason_adm0_rasterstats.csv"
 ec = pd.read_csv(
     utils.PROC_ECMWF_DIR / filename, parse_dates=["pub_date", "valid_date"]
 )
@@ -215,7 +215,7 @@ ec_year_season_lt = calc_quantile(
 ec_year_season_lt
 ```
 
-## Evaluate performance
+## Evaluate performance - whole season
 
 ### Merge
 
@@ -246,10 +246,10 @@ actual = (
     .swaplevel(axis=1)
     .rename(columns={col: "actual"})
 )
-pred_col = "ec_mean_q33"
+pred_col = "ec_season_mean_q33"
 
 pred = compare.pivot(
-    columns=["ADM0_CODE", "leadtime"], values=[pred_col], index="year"
+    columns=["ADM0_CODE", "season_lt"], values=[pred_col], index="year"
 )[pred_col]
 ```
 
@@ -308,15 +308,61 @@ scores_by_thresh = pd.concat(dfs, ignore_index=True)
 ```
 
 ```python
-for adm, group in scores_by_thresh.groupby("ADM0_CODE"):
+metric = "precision"
+
+fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+for ((adm, group), ax) in zip(scores_by_thresh.groupby("ADM0_CODE"), axs):
     group.pivot_table(
-        columns=leadtime_name, index="thresh", values="precision"
-    ).plot(title=adm)
+        columns=leadtime_name, index="thresh", values=metric
+    ).plot(title=adm, ylabel=metric, ax=ax)
+plt.tight_layout()
+```
+
+```python
+compare
+```
+
+```python
+thresh_step = 0.05
+n_lts = 4
+threshs = np.linspace(thresh_step * (n_lts - 1), 1, 5)
+lt_name = "season_lt"
+pred_name = "ec_season_mean"
+actual_name = "ec_re_mean"
+
+actual_bool = f"{actual_name}_q33"
+
+triggers = compare.copy()
+dfs = []
+
+for thresh in threshs:
+    lt_threshs = -np.arange(0, n_lts) * thresh_step + thresh
+    triggers["lt_thresh"] = triggers[lt_name].apply(
+        lambda x: lt_threshs[x - 1]
+    )
+    triggers["trigger"] = triggers[pred_name] < triggers["lt_thresh"]
+    for adm, group in triggers.groupby("ADM0_CODE"):
+        df_add = group.pivot(columns=lt_name, index="year", values="trigger")
+        df_add["any_pred_trigger"] = df_add.any(axis=1)
+        df_add["actual"] = group.groupby("year")[actual_bool].first()
+        print(df_add)
+
+
+triggers
+```
+
+```python
+test = pd.DataFrame()
+test["actual"] = [True, True]
+test["pred"] = [False, False]
+```
+
+```python
+utils.calc_confusion(test, "actual", "pred")
 ```
 
 ```python
 def plot_roc(df, actual_col, pred_col, colors_param, plots_param):
-
     # Group by 'ADM0_CODE' and 'leadtime' and calculate ROC curve for each group
     roc_auc_values = []
 
@@ -325,12 +371,11 @@ def plot_roc(df, actual_col, pred_col, colors_param, plots_param):
 
     # Create subplots
     fig, axs = plt.subplots(
-        len(unique_adm_codes), 1, figsize=(10, 15), sharex=True, sharey=True
+        1, len(unique_adm_codes), figsize=(15, 5), sharex=True, sharey=True
     )
     fig.suptitle(
         "Receiver Operating Characteristic (ROC) Curve by ADM0_CODE", y=1.02
     )
-
     for i, adm_code in enumerate(unique_adm_codes):
         ax = axs[i]
         adm_group = compare[compare["ADM0_CODE"] == adm_code]
@@ -349,7 +394,6 @@ def plot_roc(df, actual_col, pred_col, colors_param, plots_param):
                 lw=2,
                 label=f"Leadtime {leadtime} (AUC = {roc_auc:.2f})",
             )
-
         ax.plot(
             [0, 1],
             [0, 1],
@@ -365,17 +409,212 @@ def plot_roc(df, actual_col, pred_col, colors_param, plots_param):
         ax.set_xlim([0, 1])
         ax.set_ylim([0, 1])
         ax.set_aspect("equal", "box")
-
-    # Display AUC values
-    # print("AUC values by ADM0_CODE and Leadtime:")
-    # for (adm_code, leadtime), auc_value in roc_auc_values:
-    #     print(f"{adm_code}, Leadtime {leadtime}: {auc_value:.2f}")
-
     plt.tight_layout()
     plt.show()
 
 
 plot_roc(compare, "ec_re_mean_q33", "ec_season_mean", "season_lt", "")
+```
+
+```python
+
+```
+
+## Evaluate performance - month-by-month
+
+### Merge monthly
+
+Merge dataframes for comparison
+
+```python
+years = range(1981, 2023)
+
+# compare = ec_re.merge(ec_year_season_lt, on=["ADM0_CODE", "year"])
+compare = ec_re.merge(ec_year_leadtime_eq, on=["ADM0_CODE", "year"])
+# compare = ch.merge(ec_year_leadtime_eq, on=["ADM0_CODE", "year"])
+# compare = ch.merge(iri_year_leadtime_eq, on=["ADM0_CODE", "year"])
+# compare = calc_quantile(compare, 1 / 3, "ch_mean_corrected", ["ADM0_CODE"])
+compare = calc_quantile(compare, 1 / 3, "ec_re_mean", ["ADM0_CODE"])
+```
+
+```python
+compare
+```
+
+```python
+col = "ec_re_mean_q33"
+actual = (
+    compare.groupby(["ADM0_CODE", "year"])[col]
+    .first()
+    .reset_index()
+    .pivot(columns="ADM0_CODE", index="year")
+    .swaplevel(axis=1)
+    .rename(columns={col: "actual"})
+)
+pred_col = "ec_season_mean_q33"
+
+pred = compare.pivot(
+    columns=["ADM0_CODE", "season_lt"], values=[pred_col], index="year"
+)[pred_col]
+```
+
+### Calculate performance metrics monthly
+
+For fixed threshold (e.g. 33% quantile, correponding to 3-year return period of trigger).
+Note that when trigger is adjusted to have the same return period as the actual event,
+the precision, recall, and F1 score will always be equal to each other.
+
+```python
+actual_name = "ec_re_mean"
+pred_name = "ec_mean"
+q_pred = 33
+leadtime_name = "leadtime"
+
+actual_bool = f"{actual_name}_q33"
+pred_bool = f"{pred_name}_q{q_pred}"
+
+dfs = []
+for (lt, adm), group in compare.groupby([leadtime_name, "ADM0_CODE"]):
+    class_rep = classification_report(
+        group[actual_bool], group[pred_bool], output_dict=True
+    ).get("True")
+    corr = group[actual_name].corr(group[pred_name])
+    df_add = pd.DataFrame(class_rep, index=[0])
+    df_add[[leadtime_name, "ADM0_CODE", "corr"]] = lt, adm, corr
+    dfs.append(df_add)
+
+scores = pd.concat(dfs, ignore_index=True)
+
+metric = "precision"
+scores.pivot_table(
+    index=leadtime_name, columns="ADM0_CODE", values=metric
+).plot(title=f"{metric} between {actual_name} and {pred_name}, q={q_pred}")
+
+metric = "corr"
+scores.pivot_table(
+    index=leadtime_name, columns="ADM0_CODE", values=metric
+).plot(title=f"{metric} between {actual_name} and {pred_name}")
+```
+
+```python
+threshs = np.linspace(compare[pred_name].min(), compare[pred_name].max())
+
+warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
+for (lt, adm), group in compare.groupby([leadtime_name, "ADM0_CODE"]):
+    for thresh in threshs:
+        class_rep = classification_report(
+            group[actual_bool], group[pred_name] < thresh, output_dict=True
+        ).get("True")
+        df_add = pd.DataFrame(class_rep, index=[0])
+        df_add[[leadtime_name, "ADM0_CODE", "thresh"]] = lt, adm, thresh
+        dfs.append(df_add)
+
+scores_by_thresh = pd.concat(dfs, ignore_index=True)
+```
+
+```python
+metric = "precision"
+
+fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+for ((adm, group), ax) in zip(scores_by_thresh.groupby("ADM0_CODE"), axs):
+    group.pivot_table(
+        columns=leadtime_name, index="thresh", values=metric
+    ).plot(title=adm, ylabel=metric, ax=ax)
+plt.tight_layout()
+```
+
+```python
+thresh_step = 0.05
+n_lts = 4
+threshs = np.linspace(thresh_step * (n_lts - 1), 1, 5)
+lt_name = "season_lt"
+pred_name = "ec_season_mean"
+actual_name = "ec_re_mean"
+
+actual_bool = f"{actual_name}_q33"
+
+triggers = compare.copy()
+dfs = []
+
+for thresh in threshs:
+    lt_threshs = -np.arange(0, n_lts) * thresh_step + thresh
+    triggers["lt_thresh"] = triggers[lt_name].apply(
+        lambda x: lt_threshs[x - 1]
+    )
+    triggers["trigger"] = triggers[pred_name] < triggers["lt_thresh"]
+    for adm, group in triggers.groupby("ADM0_CODE"):
+        df_add = group.pivot(columns=lt_name, index="year", values="trigger")
+        df_add["any_pred_trigger"] = df_add.any(axis=1)
+        df_add["actual"] = group.groupby("year")[actual_bool].first()
+        print(df_add)
+
+
+triggers
+```
+
+```python
+test = pd.DataFrame()
+test["actual"] = [True, True]
+test["pred"] = [False, False]
+```
+
+```python
+utils.calc_confusion(test, "actual", "pred")
+```
+
+```python
+def plot_roc(df, actual_col, pred_col, colors_param, plots_param):
+    # Group by 'ADM0_CODE' and 'leadtime' and calculate ROC curve for each group
+    roc_auc_values = []
+
+    # Get unique ADM0_CODE values
+    unique_adm_codes = compare["ADM0_CODE"].unique()
+
+    # Create subplots
+    fig, axs = plt.subplots(
+        1, len(unique_adm_codes), figsize=(15, 5), sharex=True, sharey=True
+    )
+    fig.suptitle(
+        "Receiver Operating Characteristic (ROC) Curve by ADM0_CODE", y=1.02
+    )
+    for i, adm_code in enumerate(unique_adm_codes):
+        ax = axs[i]
+        adm_group = compare[compare["ADM0_CODE"] == adm_code]
+
+        for leadtime, group in adm_group.groupby(colors_param):
+            fpr, tpr, thresholds = roc_curve(
+                group[actual_col], -group[pred_col]
+            )
+            roc_auc = auc(fpr, tpr)
+            roc_auc_values.append(((adm_code, leadtime), roc_auc))
+
+            # Plot ROC curve for each group
+            ax.plot(
+                fpr,
+                tpr,
+                lw=2,
+                label=f"Leadtime {leadtime} (AUC = {roc_auc:.2f})",
+            )
+        ax.plot(
+            [0, 1],
+            [0, 1],
+            color="navy",
+            lw=2,
+            linestyle="--",
+            label="Random Guess",
+        )
+        ax.set_title(adm_code)
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.legend(loc="lower right")
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 1])
+        ax.set_aspect("equal", "box")
+    plt.tight_layout()
+    plt.show()
+
+
+plot_roc(compare, "ec_re_mean_q33", "ec_mean", "leadtime", "")
 ```
 
 ```python

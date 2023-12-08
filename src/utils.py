@@ -21,6 +21,7 @@ from ochanticipy import (
 )
 from rasterio.enums import Resampling
 from shapely import box
+from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
 DATA_DIR = Path(os.getenv("AA_DATA_DIR"))
@@ -43,6 +44,12 @@ PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
 PROC_CHIRPS_DIR = DATA_DIR / "public" / "processed" / "sah" / "chirps"
 PROC_CHIRPS_INSEASON_DIR = PROC_CHIRPS_DIR / "inseason"
 RAW_BADYEARS_DIR = DATA_DIR / "public" / "raw" / "sah" / "bad_years"
+
+
+def calc_confusion(df: pd.DataFrame, actual_col: str, pred_col: str) -> dict:
+    conf = confusion_matrix(df[actual_col], df[pred_col])
+    print(conf)
+    return {}
 
 
 def calc_quantile(df, q, col, agg_cols):
@@ -71,25 +78,43 @@ def calc_abs_anom(x: pd.Series) -> pd.Series:
     return x - x.mean()
 
 
-def calculate_ecmwf_reanalysis_inseason_stats():
+def calculate_ecmwf_raster_stats(
+    product: Literal["forecast", "reanalysis"],
+    variable: Literal[
+        "zscore", "zscore_lt", "rank", "tp", "tprate", "pct", "abs_anom"
+    ],
+):
     aoi = load_codab(aoi_only=True)
     dfs = []
     for year in tqdm(range(1981, 2023)):
-        das = []
         for month in range(1, 13):
-            da_in = load_ecmwf_inseason(
-                product="reanalysis",
-                publication_date=f"{year}-{month:02}-01",
-                variable="tp",
+            pub_date_str = f"{year}-{month:02}-01"
+            try:
+                da_in = load_ecmwf_inseason(
+                    product=product,
+                    publication_date=pub_date_str,
+                    variable=variable,
+                )
+            except FileNotFoundError:
+                print(f"couldn't open {pub_date_str}")
+                continue
+            da_in["pub_date"] = pub_date_str
+            df_in = da_in.oap.compute_raster_stats(
+                aoi, feature_col="ADM0_CODE"
             )
-            da_in["month"] = month
-            das.append(da_in)
-        da = xr.concat(das, dim="month")
-        df_in = da.oap.compute_raster_stats(aoi, feature_col="ADM0_CODE")
-        df_in["year"] = year
-        dfs.append(df_in)
+            dfs.append(df_in)
 
-    # df = pd.concat(dfs, ignore_index=True)
+    df = pd.concat(dfs, ignore_index=True)
+    df["pub_date"] = pd.to_datetime(df["pub_date"])
+
+    if product == "forecast":
+        df["valid_date"] = pd.to_datetime(
+            df["pub_date"]
+            + df["leadtime"].apply(lambda x: pd.DateOffset(months=x - 1))
+        )
+
+    filename = f"ecmwf_{product}_{variable}_inseason_adm0_rasterstats.csv"
+    df.to_csv(PROC_ECMWF_DIR / filename, index=False)
 
 
 def process_ecmwf_reanalysis():
@@ -267,7 +292,12 @@ def process_ecmwf_zscore():
     """Calcualte ECMWF zscores"""
     da = load_ecmwf()
     ds = da.to_dataset()
-    da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12
+    # valid_month is set assuming that for leadtime = 1,
+    # valid_month = initialization month.
+    # This is DIFFERENT from the valid_time coordinate in ECMWF forecasts
+    # downloaded from the CDS API, which assumes for leadtime = 1,
+    # valid_time.dt.month = initialization month + 1.
+    da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 2) % 12 + 1
 
     # calculate rank and zscore assuming no leadtime bias
     df = da.to_dataframe().reset_index()

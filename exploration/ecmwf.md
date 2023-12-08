@@ -73,10 +73,10 @@ Again, kind of tricky to do in `xarray`.
 ```python
 da = utils.load_ecmwf()
 ds = da.to_dataset()
-da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 1) % 12 + 1
+da["valid_month"] = (da["time"].dt.month + da["leadtime"] - 2) % 12 + 1
 df = da.to_dataframe().reset_index()
 df["valid_time"] = df.apply(
-    lambda row: row["time"] + pd.DateOffset(months=row["leadtime"]), axis=1
+    lambda row: row["time"] + pd.DateOffset(months=row["leadtime"] - 1), axis=1
 )
 df_groupby = df.groupby(["valid_month", "latitude", "longitude"])["tprate"]
 df["rank"] = df_groupby.rank().astype("float32")
@@ -133,8 +133,11 @@ df.groupby(["valid_month", "leadtime"]).mean().groupby("valid_month")[
     "tprate"
 ].transform(lambda x: x / x.mean()).reset_index().pivot_table(
     columns="valid_month", index="leadtime"
-).plot(
-    cmap="Paired"
+)[
+    "tprate"
+].plot(
+    cmap="Paired",
+    ylabel="Forecasted precipitation,\nnormalized by valid month",
 )
 ```
 

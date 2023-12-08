@@ -27,6 +27,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from src import utils
 ```
@@ -59,5 +60,18 @@ cod_aoi.plot()
 ```
 
 ```python
+cod_aoi_0 = cod_aoi.dissolve("ADM0_CODE")
+cod_aoi_1 = cod_aoi.dissolve("ADM1_CODE")
+```
 
+```python
+fig, ax = plt.subplots(figsize=(25, 5))
+ax.axis("off")
+cod_aoi_1.plot(ax=ax, column="ADM0_NAME", legend=True)
+cod_aoi_1.apply(
+    lambda x: ax.annotate(
+        text=x["ADM1_NAME"], xy=x.geometry.centroid.coords[0], ha="center"
+    ),
+    axis=1,
+)
 ```
