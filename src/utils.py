@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import os
+from io import BytesIO
 from pathlib import Path
 from typing import Literal
 
@@ -19,6 +20,7 @@ from ochanticipy import (
     create_country_config,
     create_custom_country_config,
 )
+from owslib.wms import WebMapService
 from rasterio.enums import Resampling
 from shapely import box
 from sklearn.metrics import confusion_matrix
@@ -44,6 +46,8 @@ PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
 PROC_CHIRPS_DIR = DATA_DIR / "public" / "processed" / "sah" / "chirps"
 PROC_CHIRPS_INSEASON_DIR = PROC_CHIRPS_DIR / "inseason"
 RAW_BADYEARS_DIR = DATA_DIR / "public" / "raw" / "sah" / "bad_years"
+RAW_VSI_DIR = DATA_DIR / "public" / "raw" / "sah" / "vsi"
+PROC_VSI_DIR = DATA_DIR / "public" / "processed" / "sah" / "vsi"
 
 
 def calc_confusion(df: pd.DataFrame, actual_col: str, pred_col: str) -> dict:
@@ -123,6 +127,65 @@ def calc_zscore(x: pd.Series) -> pd.Series:
 def calc_abs_anom(x: pd.Series) -> pd.Series:
     """Calculates absolute anomaly for series"""
     return x - x.mean()
+
+
+def process_vhi_inseason():
+    raw_files = os.listdir(RAW_VSI_DIR)
+    season = load_asap_inseason_allmonths()
+
+    for raw_filename in tqdm(raw_files):
+        month = int(
+            raw_filename.removeprefix("VHI_M_")
+            .removesuffix(".tif")
+            .split("-")[1]
+        )
+        da = (
+            rxr.open_rasterio(RAW_VSI_DIR / raw_filename)
+            .squeeze(drop=True)
+            .rename({"x": "longitude", "y": "latitude"})
+        )
+        season_m = season.sel(month=month)
+        da = da.interp_like(season_m, method="nearest")
+        da = da * season_m.where(season_m == 1)
+        da = da.fillna(255)
+        da = da.astype("uint8")
+        filename = f"{raw_filename}_sah_inseason.tif"
+        da.rio.to_raster(PROC_VSI_DIR / filename, driver="COG")
+
+
+def download_vhi(clobber: bool = False):
+    wms_url = (
+        "https://io.apps.fao.org/geoserver/wms/ASIS/VHI_M/"
+        "v1?service=WMS&version=1.3.0&request=GetCapabilities"
+    )
+    wms = WebMapService(wms_url)
+    layers = list(wms.contents)
+    s = load_asap_inseason(interval="dekad", number=1)
+    x_pitch = abs(s.x[0] - s.x[1]).values
+    y_pitch = abs(s.y[0] - s.y[1]).values
+    bbox = (
+        float(s.x.min().values) - x_pitch * 3,
+        float(s.y.min().values) - y_pitch * 3,
+        float(s.x.max().values) + x_pitch * 3,
+        float(s.y.max().values) + y_pitch * 3,
+    )
+    height = len(s.x)
+    width = len(s.y)
+    for layer in tqdm(layers):
+        filename = f"{layer.removesuffix(':ASIS:asis_vhi_m')}.tif"
+        filepath = RAW_VSI_DIR / filename
+        if filepath.exists() and not clobber:
+            continue
+        response = wms.getmap(
+            layers=[layer],
+            srs="EPSG:4326",
+            bbox=bbox,
+            size=(width, height),
+            format="image/geotiff",
+            transparent=True,
+        )
+        ds = rxr.open_rasterio(BytesIO(response.read()))
+        ds.rio.to_raster(filepath, driver="COG")
 
 
 def calculate_ecmwf_raster_stats(
