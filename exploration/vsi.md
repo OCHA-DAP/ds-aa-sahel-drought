@@ -27,6 +27,7 @@ from io import BytesIO
 
 import rioxarray as rxr
 import matplotlib.pyplot as plt
+import pandas as pd
 from owslib.wms import WebMapService
 from shapely.geometry import box
 from tqdm.notebook import tqdm
@@ -43,24 +44,14 @@ utils.process_vhi_inseason()
 ```
 
 ```python
-
+utils.calculate_vhi_raster_stats()
 ```
 
 ```python
-test
+filename = "vhi_inseason_adm0_rasterstats.csv"
+stats = pd.read_csv(utils.PROC_VHI_DIR / filename)
 ```
 
 ```python
-fig, ax = plt.subplots(figsize=(25, 5))
-aoi.boundary.plot(ax=ax, linewidth=0.5, color="k")
-ax.axis("off")
-test.plot(ax=ax)
-```
-
-```python
-s = utils.load_asap_inseason(interval="dekad", number=1)
-```
-
-```python
-s
+stats.pivot(index="")
 ```

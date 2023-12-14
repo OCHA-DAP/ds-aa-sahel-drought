@@ -46,8 +46,8 @@ PROC_ECMWF_INSEASON_DIR = PROC_ECMWF_DIR / "inseason"
 PROC_CHIRPS_DIR = DATA_DIR / "public" / "processed" / "sah" / "chirps"
 PROC_CHIRPS_INSEASON_DIR = PROC_CHIRPS_DIR / "inseason"
 RAW_BADYEARS_DIR = DATA_DIR / "public" / "raw" / "sah" / "bad_years"
-RAW_VSI_DIR = DATA_DIR / "public" / "raw" / "sah" / "vsi"
-PROC_VSI_DIR = DATA_DIR / "public" / "processed" / "sah" / "vsi"
+RAW_VHI_DIR = DATA_DIR / "public" / "raw" / "sah" / "vhi"
+PROC_VHI_DIR = DATA_DIR / "public" / "processed" / "sah" / "vhi"
 
 
 def calc_confusion(df: pd.DataFrame, actual_col: str, pred_col: str) -> dict:
@@ -129,8 +129,33 @@ def calc_abs_anom(x: pd.Series) -> pd.Series:
     return x - x.mean()
 
 
+def calculate_vhi_raster_stats():
+    aoi = load_codab(aoi_only=True)
+    filenames = os.listdir(PROC_VHI_DIR)
+    dfs = []
+    for filename in tqdm(filenames):
+        if not filename.endswith(".tif"):
+            continue
+        year, month = (
+            filename.removeprefix("VHI_M_")
+            .removesuffix("_sah_inseason.tif")
+            .split("-")
+        )
+        da = rxr.open_rasterio(PROC_VHI_DIR / filename).squeeze(drop=True)
+        da = da.where(da < 251)
+        df = da.oap.compute_raster_stats(aoi, feature_col="ADM0_CODE")
+        df["year"] = int(year)
+        df["month"] = int(month)
+        dfs.append(df)
+
+    stats = pd.concat(dfs, ignore_index=True)
+    stats.to_csv(
+        PROC_VHI_DIR / "vhi_inseason_adm0_rasterstats.csv", index=False
+    )
+
+
 def process_vhi_inseason():
-    raw_files = os.listdir(RAW_VSI_DIR)
+    raw_files = os.listdir(RAW_VHI_DIR)
     season = load_asap_inseason_allmonths()
 
     for raw_filename in tqdm(raw_files):
@@ -140,7 +165,7 @@ def process_vhi_inseason():
             .split("-")[1]
         )
         da = (
-            rxr.open_rasterio(RAW_VSI_DIR / raw_filename)
+            rxr.open_rasterio(RAW_VHI_DIR / raw_filename)
             .squeeze(drop=True)
             .rename({"x": "longitude", "y": "latitude"})
         )
@@ -149,11 +174,12 @@ def process_vhi_inseason():
         da = da * season_m.where(season_m == 1)
         da = da.fillna(255)
         da = da.astype("uint8")
-        filename = f"{raw_filename}_sah_inseason.tif"
-        da.rio.to_raster(PROC_VSI_DIR / filename, driver="COG")
+        filename = f"{raw_filename.removesuffix('.tif')}_sah_inseason.tif"
+        da.rio.to_raster(PROC_VHI_DIR / filename, driver="COG")
 
 
 def download_vhi(clobber: bool = False):
+    """Download VHI from Web Map Service"""
     wms_url = (
         "https://io.apps.fao.org/geoserver/wms/ASIS/VHI_M/"
         "v1?service=WMS&version=1.3.0&request=GetCapabilities"
@@ -163,6 +189,10 @@ def download_vhi(clobber: bool = False):
     s = load_asap_inseason(interval="dekad", number=1)
     x_pitch = abs(s.x[0] - s.x[1]).values
     y_pitch = abs(s.y[0] - s.y[1]).values
+    # With WMS, cannot actually get raw raster.
+    # So instead we just approximate the raw raster since we know the
+    # resolution (1 km), which is the same as the ASAP inseason.
+    # Extra padding is added to bbox to ensure that whole area is captured.
     bbox = (
         float(s.x.min().values) - x_pitch * 3,
         float(s.y.min().values) - y_pitch * 3,
@@ -173,7 +203,7 @@ def download_vhi(clobber: bool = False):
     width = len(s.y)
     for layer in tqdm(layers):
         filename = f"{layer.removesuffix(':ASIS:asis_vhi_m')}.tif"
-        filepath = RAW_VSI_DIR / filename
+        filepath = RAW_VHI_DIR / filename
         if filepath.exists() and not clobber:
             continue
         response = wms.getmap(
