@@ -24,6 +24,7 @@ jupyter:
 ```python
 import pandas as pd
 import seaborn as sns
+import matplotlib.pyplot as plt
 
 from src import utils
 ```
@@ -43,6 +44,24 @@ ch = ch.rename(
 ```
 
 ```python
+filename = "vhi_anom_scores_adm0.csv"
+vhi_anom = (
+    pd.read_csv(utils.PROC_VHI_DIR / "anom" / filename)
+    .rename(columns={"weighted_mean": "vhi_anom"})
+    .drop(columns=["mean", "sum", "count"])
+)
+```
+
+```python
+filename = "vhi_actual_scores_adm0.csv"
+vhi_actual = (
+    pd.read_csv(utils.PROC_VHI_DIR / "actual" / filename)
+    .rename(columns={"weighted_mean": "vhi_actual"})
+    .drop(columns=["mean", "sum", "count", "max", "month", "std", "min"])
+)
+```
+
+```python
 bad_years = utils.load_bad_years()
 ```
 
@@ -57,8 +76,11 @@ for n in [1, 2, 3]:
 ```
 
 ```python
-compare = bad_years.merge(ec_re, on=["ADM0_CODE", "year"]).merge(
-    ch, on=["ADM0_CODE", "year"]
+compare = (
+    bad_years.merge(ec_re, on=["ADM0_CODE", "year"])
+    .merge(ch, on=["ADM0_CODE", "year"])
+    .merge(vhi_actual, on=["ADM0_CODE", "year"])
+    .merge(vhi_anom, on=["ADM0_CODE", "year"])
 )
 ```
 
@@ -73,9 +95,36 @@ compare = compare[
 ```
 
 ```python
+compare
+```
+
+```python
 corr = compare.set_index(["year", "ADM0_CODE"]).corr(numeric_only=True)
 ```
 
 ```python
 sns.heatmap(corr, annot=True)
+```
+
+```python
+compare_all = (
+    ec_re.merge(ch, on=["ADM0_CODE", "year"])
+    .merge(vhi_actual, on=["ADM0_CODE", "year"])
+    .merge(vhi_anom, on=["ADM0_CODE", "year"])
+)
+compare_all = compare_all[
+    [
+        col
+        for col in compare_all.columns
+        if not (col.endswith("_bool") or col.endswith("_rank"))
+    ]
+]
+```
+
+```python
+for adm, group in compare_all.groupby("ADM0_CODE"):
+    fig, ax = plt.subplots()
+    corr = group.set_index(["year", "ADM0_CODE"]).corr(numeric_only=True)
+    sns.heatmap(corr, annot=True, ax=ax)
+    ax.set_title(adm)
 ```

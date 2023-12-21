@@ -129,19 +129,22 @@ def calc_abs_anom(x: pd.Series) -> pd.Series:
     return x - x.mean()
 
 
-def calculate_vhi_raster_stats():
+def calculate_vhi_raster_stats(variable: Literal["actual", "anom"]):
     aoi = load_codab(aoi_only=True)
-    filenames = os.listdir(PROC_VHI_DIR)
+    load_dir = PROC_VHI_DIR / variable / "inseason"
+    filenames = os.listdir(load_dir)
+    if variable == "actual":
+        prefix, suffix = "VHI_M_", "_sah_inseason.tif"
+    else:
+        prefix, suffix = "sah_vhi_monthly_aoi_inseason_anom_", ".tif"
     dfs = []
     for filename in tqdm(filenames):
         if not filename.endswith(".tif"):
             continue
         year, month = (
-            filename.removeprefix("VHI_M_")
-            .removesuffix("_sah_inseason.tif")
-            .split("-")
+            filename.removeprefix(prefix).removesuffix(suffix).split("-")[:2]
         )
-        da = rxr.open_rasterio(PROC_VHI_DIR / filename).squeeze(drop=True)
+        da = rxr.open_rasterio(load_dir / filename).squeeze(drop=True)
         da = da.where(da < 251)
         df = da.oap.compute_raster_stats(aoi, feature_col="ADM0_CODE")
         df["year"] = int(year)
@@ -149,14 +152,48 @@ def calculate_vhi_raster_stats():
         dfs.append(df)
 
     stats = pd.concat(dfs, ignore_index=True)
+    save_dir = PROC_VHI_DIR / variable
     stats.to_csv(
-        PROC_VHI_DIR / "vhi_inseason_adm0_rasterstats.csv", index=False
+        save_dir / f"vhi_{variable}_inseason_adm0_rasterstats.csv", index=False
     )
+
+
+def load_vhi_anomaly() -> xr.DataArray:
+    """Loads VHI anomalies"""
+    filename = "VHI_M_all_anomaly_sah.nc"
+    da = xr.load_dataarray(PROC_VHI_DIR / filename)
+    return da
+
+
+def process_vhi_anom_inseason():
+    """Process VHI anomalies by masking with ASAP inseason"""
+    # Note: this function outputs to multiple COGs, instead of one NetCDF.
+    # This is to keep the file size down (COGs seem to be way smaller than
+    # NetCDFs of the same dimension and dtype), and also to stay consistent
+    # with previous analysis of IRI forecasts. It also seems like COGs are
+    # easier to work with in R than NetCDFs.
+    vhi = load_vhi_anomaly()
+    season = load_asap_inseason_allmonths()
+    save_dir = PROC_VHI_DIR / "anom" / "inseason"
+    if not save_dir.exists():
+        save_dir.mkdir(parents=True)
+    for date in tqdm(vhi.date):
+        valid_month = date.dt.month.values
+        season_f = season.where(season == 1).sel(month=valid_month)
+        da_interp = vhi.sel(date=date).interp_like(season_f) * season_f
+        filename = (
+            f"sah_vhi_monthly_aoi_inseason_anom_"
+            f"{pd.to_datetime(date.values).date()}.tif"
+        )
+        da_interp.rio.to_raster(save_dir / filename, driver="COG")
 
 
 def process_vhi_inseason():
     raw_files = os.listdir(RAW_VHI_DIR)
     season = load_asap_inseason_allmonths()
+    save_dir = PROC_VHI_DIR / "actual" / "inseason"
+    if not save_dir.exists():
+        save_dir.mkdir(parents=True)
 
     for raw_filename in tqdm(raw_files):
         month = int(
@@ -175,7 +212,30 @@ def process_vhi_inseason():
         da = da.fillna(255)
         da = da.astype("uint8")
         filename = f"{raw_filename.removesuffix('.tif')}_sah_inseason.tif"
-        da.rio.to_raster(PROC_VHI_DIR / filename, driver="COG")
+        da.rio.to_raster(save_dir / filename, driver="COG")
+
+
+def process_vhi():
+    raw_files = os.listdir(RAW_VHI_DIR)
+
+    das = []
+    for raw_filename in tqdm(raw_files):
+        year, month = (
+            raw_filename.removeprefix("VHI_M_").removesuffix(".tif").split("-")
+        )
+
+        da_in = rxr.open_rasterio(RAW_VHI_DIR / raw_filename).squeeze(
+            drop=True
+        )
+        da_in = da_in.rename({"x": "longitude", "y": "latitude"})
+        da_in["date"] = datetime.datetime(int(year), int(month), 1)
+        da_in = da_in.fillna(255)
+        da_in = da_in.astype("uint8")
+        das.append(da_in)
+
+    da = xr.concat(das, dim="date")
+    da = da.sortby("date")
+    da.to_netcdf(PROC_VHI_DIR / "VHI_M_all_sah.nc")
 
 
 def download_vhi(clobber: bool = False):
