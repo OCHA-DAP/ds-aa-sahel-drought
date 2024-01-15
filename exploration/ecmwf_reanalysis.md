@@ -66,7 +66,7 @@ da.plot(ax=ax, vmin=vmin, vmax=vmax)
 
 ```python
 dfs = []
-for year in tqdm(range(1981, 2023)):
+for year in tqdm(range(1981, 2024)):
     das = []
     for month in range(1, 13):
         da_in = utils.load_ecmwf_inseason(

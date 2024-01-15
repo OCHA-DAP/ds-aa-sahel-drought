@@ -347,7 +347,7 @@ def download_ecmwf_reanalysis():
     # Note: there is a problem with the bounding box, needs to be enlarged
     area = [bounds[3] + 1, bounds[0], bounds[1], bounds[2] + 1]
     start_year = 1981
-    end_year = 2022
+    end_year = 2023
     fileformat = "grib"
     data_request_netcdf = {
         "format": fileformat,
