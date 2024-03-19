@@ -121,7 +121,7 @@ for year in [2023]:
     ax.annotate(f" {year} ", (rp, precip), ha="right", va="top", color="r")
 ax.set_ylim(ymin, ymax)
 ax.set_xlim(xmin, xmax)
-ax.set_title("Burkina Faso precipitation return period")
+ax.set_title("Burkina Faso VHI return period")
 ```
 
 ```python

@@ -554,15 +554,23 @@ def process_ecmwf():
     aoi = load_codab(aoi_only=True)
     das = []
     system = "51"
-    fileformat = "grib"
     for leadtime in tqdm(leadtimes):
-        filename = f"ecmwf-total-leadtime-{leadtime}_sys{system}.{fileformat}"
-        ds = xr.load_dataset(RAW_ECMWF_DIR / filename, engine="cfgrib")
-        da = ds["tprate"].mean(dim=["number", "step"])
-        da.rio.write_crs(4326, inplace=True)
-        da = da.rio.clip(aoi.geometry, all_touched=True)
-        da["leadtime"] = leadtime
-        das.append(da)
+        pattern = f"ecmwf-total-leadtime-{leadtime}_sys{system}*.grib"
+        filenames = list(RAW_ECMWF_DIR.glob(pattern))
+        das_l = []
+        for filename in filenames:
+            ds = xr.load_dataset(
+                RAW_ECMWF_DIR / filename,
+                engine="cfgrib",
+                backend_kwargs={"indexpath": ""},
+            )
+            da = ds["tprate"].mean(dim=["number", "step"])
+            da.rio.write_crs(4326, inplace=True)
+            da = da.rio.clip(aoi.geometry, all_touched=True)
+            da["leadtime"] = leadtime
+            das_l.append(da)
+        da_l = xr.concat(das_l, dim="time")
+        das.append(da_l)
     em = xr.concat(das, dim="leadtime")
 
     filename = "ecmwf_total-precipitation_sah.nc"
@@ -572,17 +580,19 @@ def process_ecmwf():
     em.to_netcdf(filepath)
 
 
-def download_ecmwf():
+def download_ecmwf(start_year: int = 1981, end_year: int = 2022):
     c = cdsapi.Client()
     aoi = load_codab(aoi_only=True)
     bounds = aoi.total_bounds
     # Note: there is a problem with the bounding box, needs to be enlarged
     area = [bounds[3] + 1, bounds[0], bounds[1], bounds[2] + 1]
-    start_year = 1981
-    end_year = 2022
     leadtimes = range(1, 7)
     system = "51"
     fileformat = "grib"
+    if start_year == 2024:
+        months = [f"{d:02d}" for d in range(1, 4)]
+    else:
+        months = [f"{d:02d}" for d in range(1, 13)]
     for leadtime_month in leadtimes:
         print(leadtime_month)
         data_request_netcdf = {
@@ -592,12 +602,13 @@ def download_ecmwf():
             "variable": "total_precipitation",
             "product_type": "monthly_mean",
             "year": [f"{d}" for d in range(start_year, end_year + 1)],
-            "month": [f"{d:02d}" for d in range(1, 13)],
+            "month": months,
             "leadtime_month": leadtime_month,
             "area": area,
         }
         filename = (
-            f"ecmwf-total-leadtime-{leadtime_month}_sys{system}.{fileformat}"
+            f"ecmwf-total-leadtime-{leadtime_month}_sys{system}_"
+            f"{start_year}_{end_year}.{fileformat}"
         )
         c.retrieve(
             "seasonal-monthly-single-levels",
