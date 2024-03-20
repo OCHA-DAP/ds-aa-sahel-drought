@@ -101,7 +101,7 @@ for iso in ["BFA", "TCD"]:
         time=(ec_all["time"].dt.month == 3)
     )
     ec_bfa = upsample_dataarray(ec_bfa)
-    ec_bfa = ec_bfa.rio.clip(adm_bfa.geometry)
+    ec_bfa = ec_bfa.rio.clip(adm_bfa.geometry, all_touched=True)
     ec_bfa = ec_bfa.groupby("time.year").sum().sum(dim="leadtime")
     ec_bfa = ec_bfa.where(ec_bfa != 0, np.nan)
     ec_bfa = ec_bfa * 3600 * 24 * 1000 * 30
@@ -154,7 +154,9 @@ for iso in ["BFA", "TCD"]:
                 va="top",
             )
     ax.set_xlabel("Année")
-    ax.set_ylabel("Précipitations totales prévues (mm)")
+    ax.set_ylabel(
+        "Précipitations totales prévues,\nmoyenne sur zone d'intérêt (mm)"
+    )
     ax.set_title(
         f"Prévisions ECMWF historiques {fullname}\n"
         f"mois de publication: mars, période d'interêt: {monthsname}"
