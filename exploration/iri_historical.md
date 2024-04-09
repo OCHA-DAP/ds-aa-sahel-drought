@@ -26,7 +26,9 @@ import os
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
+import matplotlib.pyplot as plt
 
 from src import utils
 ```
@@ -79,7 +81,9 @@ iri_all = iri_all.rio.write_crs(4326)
 ```
 
 ```python
-iri_sah = iri_all.rio.clip(aoi_all.geometry, all_touched=True)["prob"]
+iri_sah = iri_all.rio.clip(aoi_all.geometry, all_touched=True)["prob"].isel(
+    C=0
+)
 iri_sah_up = upsample_dataarray(iri_sah, lat_dim="Y", lon_dim="X")
 ```
 
@@ -87,7 +91,7 @@ iri_sah_up = upsample_dataarray(iri_sah, lat_dim="Y", lon_dim="X")
 countries = [
     {
         "iso3": "BFA",
-        # "thresh": {"prob": }
+        "thresh": {"prob": 40, "frac": 0.1},
         "windows": [
             {
                 "number": 1,
@@ -101,6 +105,7 @@ countries = [
     },
     {
         "iso3": "TCD",
+        "thresh": {"prob": 42.5, "frac": 0.2},
         "windows": [
             {
                 "number": 1,
@@ -122,9 +127,61 @@ countries = [
 ```
 
 ```python
+years = range(2017, 2025)
+dicts = []
 for country in countries:
     aoi = aoi_all[aoi_all["ADM0_CODE"] == country["iso3"]]
     iri_country = iri_sah_up.rio.clip(aoi.geometry, all_touched=True)
+    thresh = country["thresh"]
+    for year in years:
+        for window in country["windows"]:
+            for monitoring_point in window["monitoring_points"]:
+                date_str = f'{year}-{monitoring_point["forecast_month"]:02}-16'
+                if date_str not in iri_country.F.dt.strftime("%Y-%m-%d"):
+                    print(f"no forecast for {date_str}")
+                    continue
+                iri_point = iri_country.sel(
+                    F=date_str,
+                    L=monitoring_point["leadtime"],
+                )
+                count_above_threshold = (
+                    (iri_point.where(iri_point >= thresh["prob"]))
+                    .count()
+                    .item()
+                )
+                total_non_null = iri_point.count().item()
+                fraction_above_threshold = (
+                    count_above_threshold / total_non_null
+                )
+                quantile = iri_point.quantile(1 - thresh["frac"]).item()
+                triggered = fraction_above_threshold >= thresh["frac"]
+                dicts.append(
+                    {
+                        "iso3": country["iso3"],
+                        "year": year,
+                        "window": window["number"],
+                        "monitoring_point": f'm{monitoring_point["forecast_month"]}l{monitoring_point["leadtime"]}',
+                        "triggered": triggered,
+                        "frac": fraction_above_threshold,
+                        "quantile": quantile,
+                    }
+                )
+```
+
+```python
+df = pd.DataFrame(dicts)
+```
+
+```python
+1 / len(years)
+```
+
+```python
+df
+```
+
+```python
+iri_point.plot()
 ```
 
 ```python

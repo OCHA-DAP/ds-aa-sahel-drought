@@ -6,7 +6,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.15.2
+      jupytext_version: 1.16.1
   kernelspec:
     display_name: ds-aa-sahel-drought
     language: python
@@ -47,6 +47,10 @@ lac_aoi.plot()
 ```
 
 ```python
+lac_aoi.total_bounds
+```
+
+```python
 LAC_DIR = (
     utils.DATA_DIR
     / "private"
@@ -77,6 +81,10 @@ LAC_PROC_CLIP_TIF_DIR = (
 
 ```python
 da_in.rio.crs
+```
+
+```python
+da_in
 ```
 
 ```python
