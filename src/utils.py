@@ -590,7 +590,7 @@ def download_ecmwf(start_year: int = 1981, end_year: int = 2022):
     system = "51"
     fileformat = "grib"
     if start_year == 2024:
-        months = [f"{d:02d}" for d in range(1, 4)]
+        months = [f"{d:02d}" for d in range(1, 5)]
     else:
         months = [f"{d:02d}" for d in range(1, 13)]
     for leadtime_month in leadtimes:

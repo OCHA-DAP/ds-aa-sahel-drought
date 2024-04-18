@@ -30,10 +30,6 @@ from src import utils
 ```
 
 ```python
-
-```
-
-```python
 adm = utils.load_codab(aoi_only=True)
 ```
 
@@ -50,7 +46,7 @@ adm_bfa
 ```
 
 ```python
-# utils.download_ecmwf(start_year=2024, end_year=2024)
+utils.download_ecmwf(start_year=2024, end_year=2024)
 ```
 
 ```python
@@ -87,10 +83,18 @@ def upsample_dataarray(
 ```python
 for iso in ["BFA", "TCD"]:
     if iso == "BFA":
+        pub_month = 3
+        pub_month_name = "mars"
         leadtimes = [4, 5, 6]
         monthsname = "juin-juillet-août"
         fullname = "Burkina Faso"
     else:
+        # pub_month = 4
+        # pub_month_name = "avril"
+        # leadtimes = [4, 5, 6]
+        # monthsname = "juillet-août-septembre"
+        pub_month = 3
+        pub_month_name = "mars"
         leadtimes = [5, 6]
         monthsname = "juillet-août"
         fullname = "Tchad"
@@ -98,13 +102,16 @@ for iso in ["BFA", "TCD"]:
     adm_bfa = adm[adm["ADM0_CODE"] == iso]
 
     ec_bfa = ec_all.sel(leadtime=leadtimes).sel(
-        time=(ec_all["time"].dt.month == 3)
+        time=(ec_all["time"].dt.month == pub_month)
     )
     ec_bfa = upsample_dataarray(ec_bfa)
     ec_bfa = ec_bfa.rio.clip(adm_bfa.geometry, all_touched=True)
     ec_bfa = ec_bfa.groupby("time.year").sum().sum(dim="leadtime")
     ec_bfa = ec_bfa.where(ec_bfa != 0, np.nan)
     ec_bfa = ec_bfa * 3600 * 24 * 1000 * 30
+
+    ec_bfa_avg = ec_bfa.mean(dim="year")
+    ec_bfa_anom = (ec_bfa - ec_bfa_avg) / ec_bfa_avg * 100
 
     fig, ax = plt.subplots(figsize=(10, 5))
     adm_bfa.boundary.plot(ax=ax, color="white", linewidth=0.5)
@@ -114,7 +121,22 @@ for iso in ["BFA", "TCD"]:
     ax.axis("off")
     ax.set_title(
         f"Prévisions ECMWF 2024 {fullname}\n"
-        f"mois de publication: mars, période d'interêt: {monthsname}"
+        f"mois de publication: {pub_month_name}, période d'interêt: {monthsname}"
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    adm_bfa.boundary.plot(ax=ax, color="k", linewidth=0.5)
+    ec_bfa_anom.sel(year=2024).plot(
+        ax=ax,
+        cbar_kwargs={
+            "label": "Anomalie de précipitations totales prévues (%)"
+        },
+        cmap="RdBu",
+    )
+    ax.axis("off")
+    ax.set_title(
+        f"Prévisions ECMWF 2024 {fullname}\n"
+        f"mois de publication: {pub_month_name}, période d'interêt: {monthsname}"
     )
 
     df_bfa = (
@@ -159,7 +181,7 @@ for iso in ["BFA", "TCD"]:
     )
     ax.set_title(
         f"Prévisions ECMWF historiques {fullname}\n"
-        f"mois de publication: mars, période d'interêt: {monthsname}"
+        f"mois de publication: {pub_month_name}, période d'interêt: {monthsname}"
     )
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
