@@ -83,10 +83,10 @@ def upsample_dataarray(
 ```python
 for iso in ["BFA", "TCD"]:
     if iso == "BFA":
-        pub_month = 3
-        pub_month_name = "mars"
-        leadtimes = [4, 5, 6]
-        monthsname = "juin-juillet-août"
+        pub_month = 7
+        pub_month_name = "juillet"
+        leadtimes = [2, 3, 4]
+        monthsname = "août-septembre-octobre"
         fullname = "Burkina Faso"
     else:
         # pub_month = 4
